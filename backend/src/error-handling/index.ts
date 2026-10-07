@@ -1,10 +1,12 @@
-module.exports = (app) => {
-  app.use((req, res, next) => {
+import { Express, Request, Response, NextFunction } from "express";
+
+export default (app: Express): void => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     // this middleware runs whenever requested page is not available
     res.status(404).json({ message: "This route does not exist" });
   });
 
-  app.use((err, req, res, next) => {
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
     // whenever you call next(err), this middleware will handle the error
     // always logs the error
     console.error("ERROR", req.method, req.path, err);
