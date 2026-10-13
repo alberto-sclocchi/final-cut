@@ -6,7 +6,9 @@
   import Home from "./routes/Home.svelte";
   import SignUp from "./routes/SignUp.svelte";
   import LogIn from "./routes/LogIn.svelte";
-  import Join from "./routes/Join.svelte";
+  import Join from "./routes/rooms/Join.svelte";
+  import NewRoom from "./routes/rooms/NewRoom.svelte";
+  import Room from "./routes/rooms/Room.svelte";
   import WatchList from "./routes/WatchList.svelte";
   import SearchBar from "./components/SearchBar.svelte";
   import Movie from "./routes/Movie.svelte";
@@ -34,6 +36,8 @@
     "/join": protect(Join),
     "/watchlist": protect(WatchList),
     "/movie/:id": protect(Movie),
+    "/new-room": protect(NewRoom),
+    "/room/:id": protect(Room),
   };
 
   const links = [

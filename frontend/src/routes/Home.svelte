@@ -38,7 +38,7 @@
 {#snippet ctas()}
   <div class="flex flex-wrap justify-center gap-3">
     <a
-      href="#/new"
+      href="#/new-room"
       class="rounded-lg px-8 py-3 font-semibold transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 bg-slate-700 text-stone-100 shadow-md hover:bg-neutral-800"
       >Create Room</a
     >
