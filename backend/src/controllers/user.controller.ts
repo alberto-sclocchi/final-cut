@@ -41,8 +41,8 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
 };
 
 // POST /api/users/watchlist/:movieId
-// adds a movie to the logged in user's watchlist
-export const addToWatchlist = async (req: Request, res: Response, next: NextFunction) => {
+// toggles a movie in the logged in user's watchlist: adds it if it's missing, removes it if it's there
+export const toggleWatchlist = async (req: Request, res: Response, next: NextFunction) => {
   const { movieId } = req.params;
 
   // same check as getMovie, so a bad id gets a clean 400 instead of a cast error
@@ -52,26 +52,30 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
   }
 
   try {
-    const movieExists = await Movie.exists({ _id: movieId });
-    if (!movieExists) {
-      res.status(404).json({ success: false, message: "Movie not found." });
-      return;
-    }
-
-    // $addToSet only adds the id if it isn't there yet, so adding twice is harmless
-    const updatedUser = await User.findByIdAndUpdate(
-      req.payload?._id,
-      { $addToSet: { watchlist: movieId } },
-      { new: true }
-    );
+    const foundUser = await User.findById(req.payload?._id).select("watchlist");
 
     // token is valid but the user was deleted in the meantime
-    if (!updatedUser) {
+    if (!foundUser) {
       res.status(401).json({ success: false, message: "User no longer exists." });
       return;
     }
 
-    res.status(200).json({ success: true, watchlist: updatedUser.watchlist });
+    const inWatchlist = foundUser.watchlist.some((id) => id.equals(movieId));
+
+    // only check the movie exists when adding, so a movie deleted from the db can still be removed
+    if (!inWatchlist && !(await Movie.exists({ _id: movieId }))) {
+      res.status(404).json({ success: false, message: "Movie not found." });
+      return;
+    }
+
+    // $pull removes the id, $addToSet adds it only if it isn't there yet (safe on double clicks)
+    const updatedUser = await User.findByIdAndUpdate(
+      foundUser._id,
+      inWatchlist ? { $pull: { watchlist: movieId } } : { $addToSet: { watchlist: movieId } },
+      { new: true }
+    );
+
+    res.status(200).json({ success: true, added: !inWatchlist, watchlist: updatedUser?.watchlist ?? [] });
   } catch (err) {
     next(err);
   }

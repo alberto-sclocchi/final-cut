@@ -1,6 +1,6 @@
 <script lang="ts">
   import { push } from "svelte-spa-router";
-  import { searchMovies, addToWatchlist, watchlist, type Movie } from "../lib/movies.svelte";
+  import { searchMovies, toggleWatchlist, watchlist, type Movie } from "../lib/movies.svelte";
   import { auth } from "../lib/auth.svelte";
 
   let query = $state("");
@@ -150,12 +150,11 @@
                 <button
                   type="button"
                   onmousedown={(e) => e.preventDefault()}
-                  onclick={() => addToWatchlist(r._id)}
-                  disabled={added}
-                  aria-label={added ? "In your watchlist" : `Add ${r.title} to watchlist`}
-                  title={added ? "In your watchlist" : "Add to watchlist"}
-                  class="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-lg text-neutral-600 transition-colors
-                    hover:bg-stone-300 disabled:cursor-default disabled:text-orange-700 disabled:hover:bg-transparent"
+                  onclick={() => toggleWatchlist(r._id)}
+                  aria-label={added ? `Remove ${r.title} from watchlist` : `Add ${r.title} to watchlist`}
+                  title={added ? "Remove from watchlist" : "Add to watchlist"}
+                  class="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-lg transition-colors hover:bg-stone-300
+                    {added ? 'text-orange-700' : 'text-neutral-600'}"
                 >
                   {added ? "✓" : "+"}
                 </button>

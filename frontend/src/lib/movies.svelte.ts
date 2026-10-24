@@ -115,16 +115,20 @@ export async function loadWatchlist() {
   watchlist.loading = false;
 }
 
-// Adds a movie to the logged in user's watchlist.
-export async function addToWatchlist(movieId: string) {
+// Adds the movie to the logged in user's watchlist, or removes it if it's already there.
+export async function toggleWatchlist(movieId: string) {
   try {
     const r = await fetch(`/api/users/watchlist/${encodeURIComponent(movieId)}`, {
       method: "POST",
       // send the authToken cookie
       credentials: "include",
     });
-    const res: { success: boolean; message?: string; watchlist?: string[] } = await r.json();
-    if (res.success) watchlist.ids = res.watchlist ?? [];
+    const res: { success: boolean; message?: string; added?: boolean; watchlist?: string[] } = await r.json();
+    if (res.success) {
+      watchlist.ids = res.watchlist ?? [];
+      // drop removed movies so the watchlist page updates without a reload
+      watchlist.movies = watchlist.movies.filter((m) => watchlist.ids.includes(m._id));
+    }
     return res;
   } catch {
     return { success: false, message: "Could not reach the server. Try again." };

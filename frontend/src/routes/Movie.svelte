@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { movieState, loadMovie, watchlist, addToWatchlist } from "../lib/movies.svelte";
+  import { movieState, loadMovie, watchlist, toggleWatchlist } from "../lib/movies.svelte";
   import { auth } from "../lib/auth.svelte";
 
   // svelte-spa-router passes the :id from /movie/:id
@@ -53,12 +53,11 @@
         {#if auth.user}
           <button
             type="button"
-            onclick={() => movie && addToWatchlist(movie._id)}
-            disabled={added}
-            aria-label={added ? "In your watchlist" : "Add to watchlist"}
-            title={added ? "In your watchlist" : "Add to watchlist"}
-            class="ml-auto shrink-0 flex size-12 cursor-pointer items-center justify-center rounded-full bg-slate-800 border border-slate-700 text-2xl
-                   text-slate-100 transition hover:bg-red-900/60 disabled:cursor-default disabled:bg-red-900/60 disabled:text-red-200"
+            onclick={() => movie && toggleWatchlist(movie._id)}
+            aria-label={added ? "Remove from watchlist" : "Add to watchlist"}
+            title={added ? "Remove from watchlist" : "Add to watchlist"}
+            class="ml-auto shrink-0 flex size-12 cursor-pointer items-center justify-center rounded-full border border-slate-700 text-2xl transition
+                   hover:bg-red-900/60 {added ? 'bg-red-900/60 text-red-200' : 'bg-slate-800 text-slate-100'}"
           >
             {added ? "✓" : "+"}
           </button>
