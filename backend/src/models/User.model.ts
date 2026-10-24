@@ -33,6 +33,12 @@ const userSchema = new Schema(
       required: [true, 'Password is required.'],
       select: false
     },
+    // what the user is allowed to do. Everyone signs up as "user", admins are set by hand in the db
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user"
+    },
     // movies the user wants to watch. Stores Movie ids, use .populate("watchlist") to get the full movies
     watchlist: {
       type: [{ type: Schema.Types.ObjectId, ref: "Movie" }],
