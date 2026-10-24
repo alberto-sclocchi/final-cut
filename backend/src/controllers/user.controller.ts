@@ -76,3 +76,21 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
     next(err);
   }
 };
+
+// GET /api/users/watchlist
+// the logged in user's watchlist, with the full movies instead of just ids
+export const getWatchlist = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const foundUser = await User.findById(req.payload?._id).select("watchlist").populate("watchlist");
+
+    // token is valid but the user was deleted in the meantime
+    if (!foundUser) {
+      res.status(401).json({ success: false, message: "User no longer exists." });
+      return;
+    }
+
+    res.status(200).json({ success: true, watchlist: foundUser.watchlist });
+  } catch (err) {
+    next(err);
+  }
+};
