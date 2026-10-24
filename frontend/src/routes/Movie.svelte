@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { movieState, loadMovie } from "../lib/movies.svelte";
+  import { movieState, loadMovie, watchlist, addToWatchlist } from "../lib/movies.svelte";
+  import { auth } from "../lib/auth.svelte";
 
   // svelte-spa-router passes the :id from /movie/:id
   let { params }: { params: { id: string } } = $props();
@@ -11,7 +12,8 @@
 
   const movie = $derived(movieState.movie);
   const year = $derived(movie?.releaseDate ? movie.releaseDate.slice(0, 4) : "");
-  const votes = $derived(new Intl.NumberFormat().format(movie?.voteCount ?? 0));
+  const votes = $derived(movie?.voteCount ?? 0);
+  const added = $derived(!!movie && watchlist.ids.includes(movie._id));
 </script>
 
 <svelte:head>
@@ -43,9 +45,24 @@
       </div>
     {/if}
     <div class="flex flex-col justify-center gap-5 min-w-0">
-      <div>
-        <h1 class="text-5xl font-bold tracking-tight">{movie.title}</h1>
-        <p class="text-slate-400 text-lg mt-2">{year}</p>
+      <div class="flex items-start gap-4">
+        <div class="min-w-0">
+          <h1 class="text-5xl font-bold tracking-tight">{movie.title}</h1>
+          <p class="text-slate-400 text-lg mt-2">{year}</p>
+        </div>
+        {#if auth.user}
+          <button
+            type="button"
+            onclick={() => movie && addToWatchlist(movie._id)}
+            disabled={added}
+            aria-label={added ? "In your watchlist" : "Add to watchlist"}
+            title={added ? "In your watchlist" : "Add to watchlist"}
+            class="ml-auto shrink-0 flex size-12 cursor-pointer items-center justify-center rounded-full bg-slate-800 border border-slate-700 text-2xl
+                   text-slate-100 transition hover:bg-red-900/60 disabled:cursor-default disabled:bg-red-900/60 disabled:text-red-200"
+          >
+            {added ? "✓" : "+"}
+          </button>
+        {/if}
       </div>
       <div class="flex items-center gap-2">
         <span class="text-amber-400 text-2xl">★</span>

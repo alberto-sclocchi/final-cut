@@ -86,3 +86,22 @@ export async function loadMovie(id: string) {
   movieState.error = res.success ? "" : (res.message ?? "Could not load the movie.");
   movieState.loading = false;
 }
+
+// ids of movies added to the watchlist from this page session, so the + can turn into a check
+export const watchlist = $state<{ ids: string[] }>({ ids: [] });
+
+// Adds a movie to the logged in user's watchlist.
+export async function addToWatchlist(movieId: string) {
+  try {
+    const r = await fetch(`/api/users/watchlist/${encodeURIComponent(movieId)}`, {
+      method: "POST",
+      // send the authToken cookie
+      credentials: "include",
+    });
+    const res: { success: boolean; message?: string; watchlist?: string[] } = await r.json();
+    if (res.success) watchlist.ids = res.watchlist ?? [];
+    return res;
+  } catch {
+    return { success: false, message: "Could not reach the server. Try again." };
+  }
+}

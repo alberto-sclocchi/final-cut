@@ -1,6 +1,7 @@
 <script lang="ts">
   import { push } from "svelte-spa-router";
-  import { searchMovies, type Movie } from "../lib/movies.svelte";
+  import { searchMovies, addToWatchlist, watchlist, type Movie } from "../lib/movies.svelte";
+  import { auth } from "../lib/auth.svelte";
 
   let query = $state("");
   let focused = $state(false);
@@ -116,14 +117,16 @@
             {loading ? 'opacity-60' : ''}"
         >
           {#each results as r, i (r._id)}
-            <li>
+            <li
+              onmouseenter={() => (highlighted = i)}
+              class="flex items-center pr-3 transition-colors
+                {i === highlighted ? 'bg-stone-200' : ''}"
+            >
               <a
                 href="#/movie/{r._id}"
                 onmousedown={(e) => e.preventDefault()}
-                onmouseenter={() => (highlighted = i)}
                 onclick={done}
-                class="flex items-center gap-3 px-3 py-2 transition-colors
-                  {i === highlighted ? 'bg-stone-200' : ''}"
+                class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2"
               >
                 {#if r.posterUrl}
                   <img
@@ -141,6 +144,22 @@
                   </p>
                 </div>
               </a>
+              {#if auth.user}
+                {@const added = watchlist.ids.includes(r._id)}
+                <!-- preventDefault on mousedown keeps the input focused so the dropdown stays open -->
+                <button
+                  type="button"
+                  onmousedown={(e) => e.preventDefault()}
+                  onclick={() => addToWatchlist(r._id)}
+                  disabled={added}
+                  aria-label={added ? "In your watchlist" : `Add ${r.title} to watchlist`}
+                  title={added ? "In your watchlist" : "Add to watchlist"}
+                  class="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-lg text-neutral-600 transition-colors
+                    hover:bg-stone-300 disabled:cursor-default disabled:text-orange-700 disabled:hover:bg-transparent"
+                >
+                  {added ? "✓" : "+"}
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>
