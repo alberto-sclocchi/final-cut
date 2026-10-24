@@ -112,11 +112,11 @@
       Sign up
     </button>
 
-    <a
-      href="/#/login"
-      class="mt-1 text-center text-sm text-slate-600 transition hover:text-orange-700"
-    >
-      Log in instead
-    </a>
+    <p class="mt-1 text-center text-sm text-slate-600">
+      Already have an account?
+      <a href="/#/login" class="font-medium transition hover:text-orange-700"
+        >Log in</a
+      >
+    </p>
   </form>
 </div>
