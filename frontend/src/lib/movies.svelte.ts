@@ -87,8 +87,33 @@ export async function loadMovie(id: string) {
   movieState.loading = false;
 }
 
-// ids of movies added to the watchlist from this page session, so the + can turn into a check
-export const watchlist = $state<{ ids: string[] }>({ ids: [] });
+// The logged in user's watchlist. `ids` lets the + buttons turn into a check,
+// `movies` are the full movies shown on the watchlist page
+export const watchlist = $state<{ ids: string[]; movies: Movie[]; loading: boolean; error: string }>({
+  ids: [],
+  movies: [],
+  loading: false,
+  error: "",
+});
+
+// Loads the logged in user's watchlist into watchlist.
+export async function loadWatchlist() {
+  watchlist.loading = true;
+  watchlist.error = "";
+
+  let res: { success: boolean; message?: string; watchlist?: Movie[] };
+  try {
+    const r = await fetch("/api/users/watchlist", { credentials: "include" });
+    res = await r.json();
+  } catch {
+    res = { success: false, message: "Could not reach the server. Try again." };
+  }
+
+  watchlist.movies = res.success ? (res.watchlist ?? []) : [];
+  watchlist.ids = watchlist.movies.map((m) => m._id);
+  watchlist.error = res.success ? "" : (res.message ?? "Could not load your watchlist.");
+  watchlist.loading = false;
+}
 
 // Adds a movie to the logged in user's watchlist.
 export async function addToWatchlist(movieId: string) {

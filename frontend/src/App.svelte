@@ -45,6 +45,7 @@
   async function handleLogOut() {
     await logOut();
     watchlist.ids = [];
+    watchlist.movies = [];
     push("/login");
   }
 </script>
