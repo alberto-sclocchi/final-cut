@@ -37,7 +37,7 @@
 <div
   class="m-1 flex flex-1 items-center justify-center rounded-md bg-stone-200 p-4"
 >
-  <form class="flex w-full max-w-xs flex-col gap-3" onsubmit={handleSubmit}>
+  <form class="flex w-full max-w-xs flex-col gap-3" onsubmit={handleSubmit} novalidate>
     <div class="flex gap-3">
       <input
         class="min-w-0 flex-1 border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
@@ -48,7 +48,6 @@
         aria-label="First name"
         autocomplete="given-name"
         bind:value={firstName}
-        required
       />
       <input
         class="min-w-0 flex-1 border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
@@ -59,7 +58,6 @@
         aria-label="Last name"
         autocomplete="family-name"
         bind:value={lastName}
-        required
       />
     </div>
 
@@ -72,7 +70,6 @@
       aria-label="Username"
       autocomplete="username"
       bind:value={username}
-      required
     />
     <input
       class="border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
@@ -83,7 +80,6 @@
       aria-label="Email"
       autocomplete="email"
       bind:value={email}
-      required
     />
     <input
       class="border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
@@ -93,9 +89,7 @@
       placeholder="Password"
       aria-label="Password"
       autocomplete="new-password"
-      minlength="8"
       bind:value={password}
-      required
     />
 
     {#if errorMessage}
