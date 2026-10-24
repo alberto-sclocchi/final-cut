@@ -16,11 +16,10 @@
     "/login": LogIn,
     "/join": Join,
     "/watchlist": WatchList,
-    "/movie": Movie,
+    "/movie/:id": Movie,
   };
 
   const links = [
-    { href: "/", label: "Home" },
     { href: "/join", label: "Join Room" },
     { href: "/watchlist", label: "Watchlist" },
   ];

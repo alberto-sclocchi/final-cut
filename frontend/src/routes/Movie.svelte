@@ -1,23 +1,31 @@
 <script lang="ts">
-  const movie = {
-    tmdbId: 603,
-    title: "The Matrix",
-    overview:
-      "lorem ipsum dolor sit amet consectetur adipiscing elit elit consequat nulla quo sit quibusdam consectetur similique est ut expedita eu dolorem optio nostrud cupidatat ullamco elit soluta velit culpa sunt irure harum nihil quod cillum expedita laborum rerum tempor qui ut sint laborum temporibus minim est autem dignissimos occaecat est",
-    releaseDate: new Date("1999-03-31"),
-    genres: ["Action", "Science Fiction"],
-    posterUrl: null as string | null,
-    rating: 8.2,
-    voteCount: 25000,
-  };
+  import { movieState, loadMovie } from "../lib/movies.svelte";
 
-  const year = movie.releaseDate.getFullYear();
-  const votes = new Intl.NumberFormat().format(movie.voteCount);
+  // svelte-spa-router passes the :id from /movie/:id
+  let { params }: { params: { id: string } } = $props();
+
+  // reload when the id changes, e.g. picking another movie from the search bar
+  $effect(() => {
+    loadMovie(params.id);
+  });
+
+  const movie = $derived(movieState.movie);
+  const year = $derived(movie?.releaseDate ? movie.releaseDate.slice(0, 4) : "");
+  const votes = $derived(new Intl.NumberFormat().format(movie?.voteCount ?? 0));
 </script>
+
+<svelte:head>
+  <title>{movie ? `${movie.title} | Final Cut` : "Final Cut"}</title>
+</svelte:head>
 
 <div
   class="flex flex-1 items-center justify-center bg-slate-600 rounded-md m-1"
 >
+  {#if movieState.loading}
+    <p class="text-slate-200 text-lg">Loading...</p>
+  {:else if movieState.error || !movie}
+    <p class="text-red-200 text-lg">{movieState.error || "Movie not found."}</p>
+  {:else}
   <div
     class="flex gap-10 p-10 bg-slate-900 text-slate-100 rounded-xl shadow-2xl w-3/4 aspect-video"
   >
@@ -60,4 +68,5 @@
       </p>
     </div>
   </div>
+  {/if}
 </div>
