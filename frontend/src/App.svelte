@@ -21,7 +21,7 @@
 
   const links = [
     { href: "/", label: "Home" },
-    { href: "/join", label: "Join Game" },
+    { href: "/join", label: "Join Room" },
     { href: "/watchlist", label: "Watchlist" },
   ];
 
@@ -34,12 +34,11 @@
   }
 </script>
 
-<div class="bg-[#B87458] h-svh w-full flex flex-col text-neutral-700">
+<div class="bg-[#B87458] min-h-svh w-full flex flex-col text-neutral-700">
   <nav class="flex h-14 w-full items-center gap-8 px-6 font-medium">
     <a href="#/" class="text-lg font-bold tracking-tight text-stone-100"
       >Final Cut</a
     >
-
     <div class="flex items-center gap-1">
       {#each links as link (link.href)}
         <a
@@ -50,10 +49,8 @@
         >
       {/each}
     </div>
-
     <div class="ml-auto flex items-center gap-3">
       <SearchBar />
-
       {#if auth.user}
         <span class="text-stone-100">Hi, {auth.user.username}</span>
         <button
@@ -76,7 +73,6 @@
       {/if}
     </div>
   </nav>
-
   <main class="flex-1 min-h-0 flex flex-col">
     <Router {routes} />
   </main>
