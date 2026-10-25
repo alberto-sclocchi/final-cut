@@ -33,7 +33,7 @@
 <div
   class="m-1 flex flex-1 items-center justify-center rounded-md bg-stone-200 p-4"
 >
-  <form class="flex w-full max-w-xs flex-col gap-3" onsubmit={handleSubmit}>
+  <form class="flex w-full max-w-xs flex-col gap-3" onsubmit={handleSubmit} novalidate>
     <input
       class="border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
              placeholder:text-slate-600/60 focus:border-orange-700"
@@ -41,9 +41,7 @@
       name="email"
       placeholder="Email"
       aria-label="Email"
-      autocomplete="email"
       bind:value={email}
-      required
     />
     <input
       class="border-b-2 border-gray-400 bg-stone-300/30 px-3 py-3 text-neutral-700 outline-none transition
@@ -54,7 +52,6 @@
       aria-label="Password"
       autocomplete="current-password"
       bind:value={password}
-      required
     />
 
     {#if errorMessage}
@@ -71,11 +68,11 @@
       Log in
     </button>
 
-    <a
-      href="/#/signup"
-      class="mt-1 text-center text-sm text-slate-600 transition hover:text-orange-700"
-    >
-      Sign up instead
-    </a>
+    <p class="mt-1 text-center text-sm text-slate-600">
+      Need an account?
+      <a href="/#/signup" class="font-medium transition hover:text-orange-700"
+        >Sign up</a
+      >
+    </p>
   </form>
 </div>

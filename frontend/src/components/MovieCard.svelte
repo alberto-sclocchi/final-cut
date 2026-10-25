@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Movie } from "./movies.svelte";
+  import type { Movie } from "../lib/movies.svelte";
 
   let { movie }: { movie: Movie } = $props();
 

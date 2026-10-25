@@ -3,13 +3,13 @@
     {
       title: "Make a new room",
       text: "Share your room code.",
-      href: "#/rooms/new",
+      href: "#/new",
       cta: "Create Room",
     },
     {
       title: "Friends join",
       text: "Everyone enters the code.",
-      href: "#/rooms/join",
+      href: "#/join",
       cta: "Join Room",
     },
     {
@@ -38,12 +38,12 @@
 {#snippet ctas()}
   <div class="flex flex-wrap justify-center gap-3">
     <a
-      href="#/rooms/new"
+      href="#/new"
       class="rounded-lg px-8 py-3 font-semibold transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 bg-slate-700 text-stone-100 shadow-md hover:bg-neutral-800"
       >Create Room</a
     >
     <a
-      href="#/rooms/join"
+      href="#/join"
       class="rounded-lg px-8 py-3 font-semibold transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700 border-2 border-slate-700 text-slate-700 hover:bg-stone-200"
       >Join Room</a
     >

@@ -1,6 +1,8 @@
 <script lang="ts">
   import Router, { push } from "svelte-spa-router";
   import active from "svelte-spa-router/active";
+  import { wrap } from "svelte-spa-router/wrap";
+  import type { Component } from "svelte";
   import Home from "./routes/Home.svelte";
   import SignUp from "./routes/SignUp.svelte";
   import LogIn from "./routes/LogIn.svelte";
@@ -9,27 +11,41 @@
   import SearchBar from "./components/SearchBar.svelte";
   import Movie from "./routes/Movie.svelte";
   import { auth, loadUser, logOut } from "./lib/auth.svelte";
+  import { watchlist } from "./lib/movies.svelte";
+
+  // on page load/refresh, check if the cookie still logs us in
+  const userLoaded = loadUser();
+
+  // only lets the page open when logged in.
+  const protect = (component: Component<any>) =>
+    wrap({
+      component,
+      conditions: [
+        async () => {
+          await userLoaded;
+          return !!auth.user;
+        },
+      ],
+    });
 
   const routes = {
     "/": Home,
     "/signup": SignUp,
     "/login": LogIn,
-    "/join": Join,
-    "/watchlist": WatchList,
-    "/movie": Movie,
+    "/join": protect(Join),
+    "/watchlist": protect(WatchList),
+    "/movie/:id": protect(Movie),
   };
 
   const links = [
-    { href: "/", label: "Home" },
     { href: "/join", label: "Join Room" },
     { href: "/watchlist", label: "Watchlist" },
   ];
 
-  // on page load/refresh, check if the cookie still logs us in
-  loadUser();
-
   async function handleLogOut() {
     await logOut();
+    watchlist.ids = [];
+    watchlist.movies = [];
     push("/login");
   }
 </script>
@@ -74,7 +90,8 @@
     </div>
   </nav>
   <main class="flex-1 min-h-0 flex flex-col">
-    <Router {routes} />
+    <!-- a protected page was opened while logged out -->
+    <Router {routes} onConditionsFailed={() => push("/login")} />
   </main>
 </div>
 

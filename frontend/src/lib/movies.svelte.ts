@@ -46,3 +46,91 @@ export async function searchMovies(
     return { success: false, message: "Could not reach the server. Try again." };
   }
 }
+
+// What the single movie endpoint sends back.
+interface MovieResponse {
+  success: boolean;
+  message?: string;
+  movie?: Movie;
+}
+
+// The movie shown on the details page.
+export const movieState = $state<{ movie: Movie | null; loading: boolean; error: string }>({
+  movie: null,
+  loading: false,
+  error: "",
+});
+
+// id of the last movie asked for, so a slow older request can't overwrite a newer one
+let currentId = "";
+
+// Loads one movie by its id into movieState.
+export async function loadMovie(id: string) {
+  currentId = id;
+  movieState.movie = null;
+  movieState.loading = true;
+  movieState.error = "";
+
+  let res: MovieResponse;
+  try {
+    const r = await fetch(`/api/movies/${encodeURIComponent(id)}`);
+    res = await r.json();
+  } catch {
+    res = { success: false, message: "Could not reach the server. Try again." };
+  }
+
+  // a newer movie was opened while this one was loading, ignore this response
+  if (id !== currentId) return;
+
+  movieState.movie = res.success ? (res.movie ?? null) : null;
+  movieState.error = res.success ? "" : (res.message ?? "Could not load the movie.");
+  movieState.loading = false;
+}
+
+// The logged in user's watchlist. `ids` lets the + buttons turn into a check,
+// `movies` are the full movies shown on the watchlist page
+export const watchlist = $state<{ ids: string[]; movies: Movie[]; loading: boolean; error: string }>({
+  ids: [],
+  movies: [],
+  loading: false,
+  error: "",
+});
+
+// Loads the logged in user's watchlist into watchlist.
+export async function loadWatchlist() {
+  watchlist.loading = true;
+  watchlist.error = "";
+
+  let res: { success: boolean; message?: string; watchlist?: Movie[] };
+  try {
+    const r = await fetch("/api/users/watchlist", { credentials: "include" });
+    res = await r.json();
+  } catch {
+    res = { success: false, message: "Could not reach the server. Try again." };
+  }
+
+  watchlist.movies = res.success ? (res.watchlist ?? []) : [];
+  watchlist.ids = watchlist.movies.map((m) => m._id);
+  watchlist.error = res.success ? "" : (res.message ?? "Could not load your watchlist.");
+  watchlist.loading = false;
+}
+
+// Adds the movie to the logged in user's watchlist, or removes it if it's already there.
+export async function toggleWatchlist(movieId: string) {
+  try {
+    const r = await fetch(`/api/users/watchlist/${encodeURIComponent(movieId)}`, {
+      method: "POST",
+      // send the authToken cookie
+      credentials: "include",
+    });
+    const res: { success: boolean; message?: string; added?: boolean; watchlist?: string[] } = await r.json();
+    if (res.success) {
+      watchlist.ids = res.watchlist ?? [];
+      // drop removed movies so the watchlist page updates without a reload
+      watchlist.movies = watchlist.movies.filter((m) => watchlist.ids.includes(m._id));
+    }
+    return res;
+  } catch {
+    return { success: false, message: "Could not reach the server. Try again." };
+  }
+}
