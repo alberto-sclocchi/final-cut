@@ -1,3 +1,5 @@
+import { watchlist, loadWatchlist } from "./movies.svelte";
+
 // same shape the backend sends back (without the password)
 export interface User {
   _id: string;
@@ -44,7 +46,10 @@ export const signup = (data: { name: string; username: string; email: string; pa
 // on success the backend sets the authToken cookie, we save the user so the nav updates right away
 export async function login(data: { email: string; password: string }) {
   const res = await request("/login", { method: "POST", body: data });
-  if (res.success) auth.user = res.user ?? null;
+  if (res.success) {
+    auth.user = res.user ?? null;
+    loadWatchlist();
+  }
   return res;
 }
 
@@ -52,9 +57,13 @@ export async function login(data: { email: string; password: string }) {
 export async function loadUser() {
   const res = await request("/verify");
   auth.user = res.success ? (res.user ?? null) : null;
+  // load the watchlist with the user, so the + buttons show a check after a refresh too
+  if (auth.user) loadWatchlist();
 }
 
 export async function logOut() {
   await request("/logout", { method: "POST" });
   auth.user = null;
+  watchlist.ids = [];
+  watchlist.movies = [];
 }
