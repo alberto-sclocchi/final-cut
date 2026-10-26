@@ -11,7 +11,6 @@
   import SearchBar from "./components/SearchBar.svelte";
   import Movie from "./routes/Movie.svelte";
   import { auth, loadUser, logOut } from "./lib/auth.svelte";
-  import { watchlist } from "./lib/movies.svelte";
 
   // on page load/refresh, check if the cookie still logs us in
   const userLoaded = loadUser();
@@ -44,8 +43,6 @@
 
   async function handleLogOut() {
     await logOut();
-    watchlist.ids = [];
-    watchlist.movies = [];
     push("/login");
   }
 </script>
