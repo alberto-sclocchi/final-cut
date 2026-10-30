@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import request from "supertest";
 import app from "../app";
-import Movie from "../models/Movie";
+import Movie from "../models/Movie.model";
 
 // the app connects to Mongo on import and there is no db in tests
 vi.mock("../db", () => ({}));
@@ -12,7 +12,7 @@ vi.mock("morgan", () => ({
   default: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
-vi.mock("../models/Movie", () => ({
+vi.mock("../models/Movie.model", () => ({
   default: { find: vi.fn(), findById: vi.fn() },
 }));
 
