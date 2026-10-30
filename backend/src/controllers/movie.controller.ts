@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
-import Movie from "../models/Movie";
+import Movie from "../models/Movie.model";
 
 // the navbar search dropdown only shows the top 10, so don't send more than that
 const MAX_RESULTS = 10;

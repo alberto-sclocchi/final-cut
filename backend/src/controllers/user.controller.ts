@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import mongoose from "mongoose";
 import User from "../models/User.model";
-import Movie from "../models/Movie";
+import Movie from "../models/Movie.model";
 
 // GET /api/users/:username
 // public profile: what other people see when they open someone's page (no email, no password)

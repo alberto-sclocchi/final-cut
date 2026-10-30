@@ -14,6 +14,7 @@ import indexRoutes from "./routes/index.routes";
 import authRoutes from "./routes/auth.routes";
 import movieRoutes from "./routes/movie.routes";
 import userRoutes from "./routes/user.routes";
+import gameRoomRoutes from "./routes/gameRoom.routes";
 import errorHandling from "./error-handling";
 
 const app = express();
@@ -32,6 +33,9 @@ app.use("/api/movies", movieRoutes);
 
 // User routes: /api/users/:username
 app.use("/api/users", userRoutes);
+
+// Game room routes: /api/game-rooms, /api/game-rooms/join, /api/game-rooms/:code(/leave|/start)
+app.use("/api/game-rooms", gameRoomRoutes);
 
 // ❗ To handle errors. Routes that don't exist or errors that you handle in specific routes
 errorHandling(app);
