@@ -40,6 +40,17 @@ const gameRoomSchema = new Schema(
       enum: ROUNDS,
       default: "ban"
     },
+    // the players taking part in the current round, snapshotted when the round began.
+    // A player who leaves mid-round still counts here, so the round doesn't stall waiting for them
+    round_players: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: []
+    },
+    // true once the current round has nothing left to collect. Set by the ban that completes it
+    round_finished: {
+      type: Boolean,
+      default: false
+    },
     // the movie the group ended up with, set when the game finishes
     winner: {
       type: Schema.Types.ObjectId,

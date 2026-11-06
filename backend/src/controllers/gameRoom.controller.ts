@@ -2,7 +2,9 @@ import { Request, Response, NextFunction } from "express";
 import GameRoom, { ROOM_STATUSES } from "../models/GameRoom.model";
 import User from "../models/User.model";
 import Movie from "../models/Movie.model";
+import Submission from "../models/Submission.model";
 import { buildPool } from "../services/pool";
+import { MIN_POOL_SIZE, banRefusal, isBanRoundFinished } from "../services/ban";
 
 const CODE_LENGTH = 6;
 const CODE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -29,9 +31,58 @@ export const makeRoomCode = () => {
 const normalizeCode = (code: unknown) =>
   typeof code === "string" && code.trim() ? code.trim().toUpperCase() : null;
 
-// mongo throws error 11000 when a unique field (here: code) already exists
-const isDuplicateCode = (err: unknown) =>
+// mongo throws error 11000 when a unique field already exists (a room code, or a second ban)
+const isDuplicateKey = (err: unknown) =>
   typeof err === "object" && err !== null && (err as { code?: number }).code === 11000;
+
+// a movie id sent by the client. Returns null if it isn't one
+const normalizeMovieId = (value: unknown) =>
+  typeof value === "string" && /^[a-f\d]{24}$/i.test(value.trim()) ? value.trim() : null;
+
+// populated mongoose documents have to be flattened before extra fields are added.
+// Test doubles are already plain objects
+const asPlain = (doc: any) => (typeof doc?.toObject === "function" ? doc.toObject() : doc);
+
+// What the ban screen needs to know: the progress, whether you can ban, and the reveal.
+// Other players' picks stay secret until the round is over
+async function getBanState(room: any, userId: any, roundFinished = !!room.round_finished) {
+  const [submitted, mySubmission] = await Promise.all([
+    Submission.countDocuments({ room: room._id, round: "ban" }),
+    Submission.findOne({ room: room._id, round: "ban", player: userId }).populate("choices.movie"),
+  ]);
+
+  const myMovie = mySubmission?.choices?.[0]?.movie ?? null;
+
+  const blockReason = banRefusal({
+    status: room.status,
+    currentRound: room.currentRound,
+    roundFinished,
+    alreadyBanned: !!myMovie,
+    poolSize: room.remaining_movies?.length ?? 0,
+  });
+
+  // once the round is over the bans are public, but only as movies: no usernames
+  let bannedMovies: unknown[] = [];
+  if (roundFinished) {
+    const bans = await Submission.find({ room: room._id, round: "ban" })
+      .select("choices")
+      .populate("choices.movie");
+
+    bannedMovies = bans
+      .flatMap((ban: any) => ban.choices.map((choice: any) => choice.movie))
+      .filter(Boolean);
+  }
+
+  return {
+    submitted: submitted ?? 0,
+    required: room.round_players?.length ?? 0,
+    finished: roundFinished,
+    can_ban: blockReason === null,
+    block_reason: blockReason,
+    my_movie: myMovie,
+    banned_movies: bannedMovies,
+  };
+}
 
 // POST /api/game-rooms
 export const createGameRoom = async (req: Request, res: Response, next: NextFunction) => {
@@ -46,7 +97,7 @@ export const createGameRoom = async (req: Request, res: Response, next: NextFunc
         res.status(201).json({ success: true, gameRoom: createdRoom });
         return;
       } catch (err) {
-        if (!isDuplicateCode(err)) throw err;
+        if (!isDuplicateKey(err)) throw err;
       }
     }
 
@@ -171,7 +222,15 @@ export const getGameRoom = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    res.status(200).json({ success: true, gameRoom: foundRoom });
+    // only a started game has a ban round, so the lobby poll doesn't need the extra queries
+    if (foundRoom.status !== "playing") {
+      res.status(200).json({ success: true, gameRoom: foundRoom });
+      return;
+    }
+
+    const bans = await getBanState(foundRoom, req.payload!._id);
+
+    res.status(200).json({ success: true, gameRoom: { ...asPlain(foundRoom), bans } });
   } catch (err) {
     next(err);
   }
@@ -287,7 +346,20 @@ export const startGameRoom = async (req: Request, res: Response, next: NextFunct
     // status: "lobby" in the filter so a double click on start can't build two pools
     const startedRoom = await GameRoom.findOneAndUpdate(
       { _id: foundRoom._id, status: "lobby" },
-      { $set: { remaining_movies: pool, status: "playing" } },
+      {
+        $set: {
+          remaining_movies: pool,
+          status: "playing",
+          // a game always opens in the ban round
+          currentRound: "ban",
+          // everyone playing now owes exactly one ban, so remember who that is. The count is
+          // what ends the round, even if someone leaves or the room fills up later
+          round_players: foundRoom.players,
+          // a pool already at the floor can't be banned from, so don't hang the round
+          round_finished: pool.length <= MIN_POOL_SIZE,
+          winner: null,
+        },
+      },
       { new: true }
     )
     .populate("players", PLAYER_FIELDS)
@@ -299,6 +371,131 @@ export const startGameRoom = async (req: Request, res: Response, next: NextFunct
     }
 
     res.status(200).json({ success: true, gameRoom: startedRoom });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/game-rooms/:code/ban
+// removes one movie from the pool for the logged in player. One locked ban per player per round
+export const banMovie = async (req: Request, res: Response, next: NextFunction) => {
+  const code = normalizeCode(req.params.code);
+  const userId = req.payload!._id;
+
+  if (!code) {
+    res.status(400).json({ success: false, message: "Please provide a room code." });
+    return;
+  }
+
+  const movieId = normalizeMovieId(req.body?.movieId);
+
+  if (!movieId) {
+    res.status(400).json({ success: false, message: "Please pick a movie to ban." });
+    return;
+  }
+
+  try {
+    const foundRoom = await GameRoom.findOne({ code }).select(
+      "host players status currentRound round_finished round_players remaining_movies"
+    );
+
+    if (!foundRoom) {
+      res.status(404).json({ success: false, message: "Room not found." });
+      return;
+    }
+
+    if (!foundRoom.players.some((id) => id.equals(userId))) {
+      res.status(403).json({ success: false, message: "You are not in this room." });
+      return;
+    }
+
+    if (foundRoom.status !== "playing") {
+      const message = foundRoom.status === "lobby" ? "This game has not started." : "This game is already over.";
+      res.status(409).json({ success: false, message });
+      return;
+    }
+
+    if (foundRoom.currentRound !== "ban") {
+      res.status(409).json({ success: false, message: "It is not the ban round." });
+      return;
+    }
+
+    if (foundRoom.round_finished) {
+      res.status(409).json({ success: false, message: "The ban round is already over." });
+      return;
+    }
+
+    // the later rounds need something to play with, so the pool can't shrink past the floor
+    if (foundRoom.remaining_movies.length <= MIN_POOL_SIZE) {
+      res.status(409).json({
+        success: false,
+        message: `The pool is at its minimum of ${MIN_POOL_SIZE} movies, so no more bans are allowed.`,
+      });
+      return;
+    }
+
+    if (!foundRoom.remaining_movies.some((id) => id.toString() === movieId)) {
+      res.status(400).json({ success: false, message: "That movie is not in the pool." });
+      return;
+    }
+
+    // the filter only matches while the movie is still in the pool, so two players banning the
+    // same movie at the same moment can't both take it. This is also the round-finished guard
+    const roomAfterBan: any = await GameRoom.findOneAndUpdate(
+      {
+        _id: foundRoom._id,
+        status: "playing",
+        currentRound: "ban",
+        round_finished: false,
+        remaining_movies: movieId,
+      },
+      { $pull: { remaining_movies: movieId } },
+      { new: true }
+    )
+      .populate("players", PLAYER_FIELDS)
+      .populate("remaining_movies");
+
+    if (!roomAfterBan) {
+      res.status(409).json({ success: false, message: "That movie was just banned by another player." });
+      return;
+    }
+
+    // the unique index on (room, round, player) is what actually locks the ban
+    try {
+      await Submission.create({
+        room: foundRoom._id,
+        round: "ban",
+        player: userId,
+        choices: [{ movie: movieId }],
+      });
+    } catch (err) {
+      if (!isDuplicateKey(err)) throw err;
+
+      // a refused second ban must not leave a hole in the pool
+      await GameRoom.updateOne({ _id: foundRoom._id }, { $addToSet: { remaining_movies: movieId } });
+      res.status(409).json({ success: false, message: "You have already banned a movie in this round." });
+      return;
+    }
+
+    const submitted = await Submission.countDocuments({ room: foundRoom._id, round: "ban" });
+
+    // the round ends when everyone in the snapshot has banned, or when the pool hits the floor
+    const finished = isBanRoundFinished(
+      submitted,
+      roomAfterBan.round_players?.length ?? 0,
+      roomAfterBan.remaining_movies.length
+    );
+
+    if (finished) {
+      await GameRoom.updateOne(
+        { _id: foundRoom._id, round_finished: false },
+        { $set: { round_finished: true } }
+      );
+    }
+
+    const bans = await getBanState(roomAfterBan, userId, finished);
+
+    res.status(200).json({ success: true, gameRoom: { ...asPlain(roomAfterBan), bans } });
   } catch (err) {
     next(err);
   }

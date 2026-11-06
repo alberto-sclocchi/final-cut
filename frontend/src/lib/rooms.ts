@@ -7,6 +7,17 @@ export interface Player {
   username: string;
 }
 
+// The ban round info GET /api/game-rooms/:code adds once the game has started.
+export interface BanState {
+  submitted: number; // how many players have banned
+  required: number; // how many bans the round needs
+  finished: boolean;
+  can_ban: boolean;
+  block_reason: string | null; // why you can't ban, null when you can
+  my_movie: Movie | null; // your own locked ban
+  banned_movies: Movie[]; // only filled in once the round is over
+}
+
 // A game room as GET /api/game-rooms/:code sends it back.
 export interface GameRoom {
   _id: string;
@@ -15,6 +26,9 @@ export interface GameRoom {
   players: Player[];
   remaining_movies: Movie[]; // empty until the game starts
   status: "lobby" | "playing" | "completed";
+  currentRound: "ban" | "hype" | "headToHead" | "wildcard" | "final";
+  round_finished: boolean;
+  bans?: BanState; // only sent while the room is playing
 }
 
 // What every room endpoint sends back.
@@ -57,6 +71,11 @@ export function getRoom(code: string) {
 // Starts the game and builds the movie pool. Only works for the host.
 export function startRoom(code: string) {
   return request("/" + code + "/start", "POST");
+}
+
+// Bans a movie in the ban round. Only works once per player, and can't be undone.
+export function banMovie(code: string, movieId: string) {
+  return request("/" + code + "/ban", "POST", { movieId: movieId });
 }
 
 // Leaves the room.

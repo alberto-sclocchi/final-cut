@@ -7,6 +7,7 @@ import app from "../app";
 import GameRoom from "../models/GameRoom.model";
 import User from "../models/User.model";
 import Movie from "../models/Movie.model";
+import Submission from "../models/Submission.model";
 import { buildPool } from "../services/pool";
 import { makeRoomCode } from "../controllers/gameRoom.controller";
 
@@ -28,11 +29,15 @@ vi.mock("../models/GameRoom.model", async (importOriginal) => ({
     findByIdAndUpdate: vi.fn(),
     find: vi.fn(),
     deleteOne: vi.fn(),
+    updateOne: vi.fn(),
   },
 }));
 
 vi.mock("../models/User.model", () => ({ default: { find: vi.fn() } }));
 vi.mock("../models/Movie.model", () => ({ default: { find: vi.fn() } }));
+vi.mock("../models/Submission.model", () => ({
+  default: { create: vi.fn(), countDocuments: vi.fn(), findOne: vi.fn(), find: vi.fn() },
+}));
 
 // the pool is random, so fake it and only check what it gets called with
 vi.mock("../services/pool", () => ({ buildPool: vi.fn() }));
@@ -43,8 +48,13 @@ const findOneAndUpdate = GameRoom.findOneAndUpdate as unknown as Mock;
 const findByIdAndUpdate = GameRoom.findByIdAndUpdate as unknown as Mock;
 const find = GameRoom.find as unknown as Mock;
 const deleteOne = GameRoom.deleteOne as unknown as Mock;
+const updateOne = GameRoom.updateOne as unknown as Mock;
 const findUsers = User.find as unknown as Mock;
 const findMovies = Movie.find as unknown as Mock;
+const createSubmission = Submission.create as unknown as Mock;
+const countSubmissions = Submission.countDocuments as unknown as Mock;
+const findSubmission = Submission.findOne as unknown as Mock;
+const findSubmissions = Submission.find as unknown as Mock;
 const buildPoolMock = buildPool as unknown as Mock;
 
 const secret = "test-secret";
@@ -72,6 +82,10 @@ function mockQuery(result: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.TOKEN_SECRET = secret;
+  // defaults so the ban state reads don't blow up in tests that don't care about them
+  countSubmissions.mockResolvedValue(0);
+  findSubmission.mockReturnValue(mockQuery(null));
+  findSubmissions.mockReturnValue(mockQuery([]));
 });
 
 afterAll(() => {
@@ -94,6 +108,7 @@ describe("game room routes need a logged in user", () => {
     ["get", "/api/game-rooms/ABCDEF"],
     ["post", "/api/game-rooms/ABCDEF/leave"],
     ["post", "/api/game-rooms/ABCDEF/start"],
+    ["post", "/api/game-rooms/ABCDEF/ban"],
     ["delete", "/api/game-rooms/ABCDEF"],
   ] as const)("%s %s returns 401 without a token", async (method, url) => {
     const res = await request(app)[method](url);
@@ -411,7 +426,9 @@ describe("POST /api/game-rooms/:code/start", () => {
     findOne.mockReturnValue(mockQuery(lobby));
     findUsers.mockReturnValue(mockQuery([{ watchlist: [movieA, deletedMovie] }, { watchlist: [movieB] }]));
     findMovies.mockReturnValue(mockQuery([{ _id: movieA }, { _id: movieB }]));
-    buildPoolMock.mockReturnValue([movieA.toString(), movieB.toString()]);
+    // a real pool is bigger than the ban round's floor, so the round starts collecting
+    const poolIds = Array.from({ length: 12 }, () => new mongoose.Types.ObjectId().toString());
+    buildPoolMock.mockReturnValue(poolIds);
     const startedRoom = { _id: roomId.toString(), status: "playing", remaining_movies: [] };
     findOneAndUpdate.mockReturnValue(mockQuery(startedRoom));
 
@@ -427,7 +444,16 @@ describe("POST /api/game-rooms/:code/start", () => {
     );
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: roomId, status: "lobby" },
-      { $set: { remaining_movies: [movieA.toString(), movieB.toString()], status: "playing" } },
+      {
+        $set: {
+          remaining_movies: poolIds,
+          status: "playing",
+          currentRound: "ban",
+          round_players: [hostId, otherId],
+          round_finished: false,
+          winner: null,
+        },
+      },
       { new: true }
     );
   });
@@ -488,6 +514,21 @@ describe("POST /api/game-rooms/:code/start", () => {
 
     consoleError.mockRestore();
   });
+
+  it("starts the ban round already finished when the pool is at the floor", async () => {
+    findOne.mockReturnValue(mockQuery(lobby));
+    findUsers.mockReturnValue(mockQuery([]));
+    findMovies.mockReturnValue(mockQuery([]));
+    const sixMovies = Array.from({ length: 6 }, () => new mongoose.Types.ObjectId());
+    buildPoolMock.mockReturnValue(sixMovies.map((id) => id.toString()));
+    findOneAndUpdate.mockReturnValue(mockQuery({ _id: roomId.toString(), status: "playing" }));
+
+    const res = await request(app).post("/api/game-rooms/ABCDEF/start").set("Cookie", authCookie(hostId));
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate.mock.calls[0][1].$set.round_finished).toBe(true);
+    expect(findOneAndUpdate.mock.calls[0][1].$set.currentRound).toBe("ban");
+  });
 });
 
 describe("DELETE /api/game-rooms/:code", () => {
@@ -520,5 +561,372 @@ describe("DELETE /api/game-rooms/:code", () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ success: false, message: "Room not found." });
+  });
+});
+
+describe("POST /api/game-rooms/:code/ban", () => {
+  // a full 12-movie pool, like a real game
+  const pool = Array.from({ length: 12 }, () => new mongoose.Types.ObjectId());
+  const banned = pool[0];
+
+  const playingRoom = (overrides: Record<string, unknown> = {}) => ({
+    _id: roomId,
+    host: hostId,
+    players: [hostId, otherId],
+    status: "playing",
+    currentRound: "ban",
+    round_finished: false,
+    round_players: [hostId, otherId],
+    remaining_movies: [...pool],
+    ...overrides,
+  });
+
+  // the room as it comes back after the movie was pulled from the pool
+  const banResponse = (movies = pool.slice(1)) => mockQuery({ ...playingRoom(), remaining_movies: movies });
+
+  it("bans a movie and records it as a ban round submission", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    findOneAndUpdate.mockReturnValue(banResponse());
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(1);
+    findSubmission.mockReturnValue(mockQuery({ choices: [{ movie: { _id: banned, title: "A" } }] }));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    // the filter re-checks everything, so a second player can't take the same movie
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: roomId,
+        status: "playing",
+        currentRound: "ban",
+        round_finished: false,
+        remaining_movies: banned.toString(),
+      },
+      { $pull: { remaining_movies: banned.toString() } },
+      { new: true }
+    );
+    expect(createSubmission).toHaveBeenCalledWith({
+      room: roomId,
+      round: "ban",
+      player: hostId.toString(),
+      choices: [{ movie: banned.toString() }],
+    });
+    expect(res.body.gameRoom.remaining_movies).toHaveLength(11);
+    expect(res.body.gameRoom.bans).toMatchObject({
+      submitted: 1,
+      required: 2,
+      finished: false,
+      can_ban: false,
+      block_reason: "You already banned a movie.",
+      banned_movies: [],
+    });
+    expect(res.body.gameRoom.bans.my_movie.title).toBe("A");
+  });
+
+  it("returns 409 and writes nothing when the pool is at the floor", async () => {
+    const movies = pool.slice(0, 6);
+    findOne.mockReturnValue(mockQuery(playingRoom({ remaining_movies: movies })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: movies[0].toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      message: "The pool is at its minimum of 6 movies, so no more bans are allowed.",
+    });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for a movie that is not in the pool", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: new mongoose.Types.ObjectId().toString() });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ success: false, message: "That movie is not in the pool." });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([["missing", {}], ["not an id", { movieId: "nope" }]])(
+    "returns 400 when the movie id is %s",
+    async (_label, body) => {
+      const res = await request(app)
+        .post("/api/game-rooms/ABCDEF/ban")
+        .set("Cookie", authCookie(hostId))
+        .send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, message: "Please pick a movie to ban." });
+      expect(findOne).not.toHaveBeenCalled();
+    }
+  );
+
+  it("returns 403 to someone who isn't in the room", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ players: [hostId] })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(otherId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ success: false, message: "You are not in this room." });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when no room has that code", async () => {
+    findOne.mockReturnValue(mockQuery(null));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ZZZZZZ/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ["lobby", "This game has not started."],
+    ["completed", "This game is already over."],
+  ])("returns 409 for a %s room", async (status, message) => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ status })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when it is not the ban round", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ currentRound: "hype" })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message: "It is not the ban round." });
+  });
+
+  it("returns 409 when the ban round is already over", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ round_finished: true })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message: "The ban round is already over." });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when another player just banned that movie", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    findOneAndUpdate.mockReturnValue(mockQuery(null));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      message: "That movie was just banned by another player.",
+    });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 and puts the movie back when the player already banned", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    findOneAndUpdate.mockReturnValue(banResponse());
+    createSubmission.mockRejectedValue(Object.assign(new Error("duplicate key"), { code: 11000 }));
+    updateOne.mockResolvedValue({});
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      message: "You have already banned a movie in this round.",
+    });
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: roomId },
+      { $addToSet: { remaining_movies: banned.toString() } }
+    );
+  });
+
+  it("finishes the round when the last player bans", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    findOneAndUpdate.mockReturnValue(banResponse());
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(2);
+    updateOne.mockResolvedValue({});
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(200);
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: roomId, round_finished: false },
+      { $set: { round_finished: true } }
+    );
+    expect(res.body.gameRoom.bans.finished).toBe(true);
+    // the game stays on the ban round, the next round is a later phase
+    expect(res.body.gameRoom.status).toBe("playing");
+    expect(res.body.gameRoom.currentRound).toBe("ban");
+  });
+
+  it("finishes the round when the pool reaches the floor", async () => {
+    const movies = pool.slice(0, 7);
+    findOne.mockReturnValue(mockQuery(playingRoom({ remaining_movies: movies, round_players: [hostId, otherId, hostId] })));
+    findOneAndUpdate.mockReturnValue(banResponse(movies.slice(1)));
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(1);
+    updateOne.mockResolvedValue({});
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: movies[0].toString() });
+
+    expect(res.status).toBe(200);
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: roomId, round_finished: false },
+      { $set: { round_finished: true } }
+    );
+    expect(res.body.gameRoom.bans.finished).toBe(true);
+  });
+
+  it("keeps the round open while bans are missing", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ round_players: [hostId, otherId, hostId] })));
+    findOneAndUpdate.mockReturnValue(banResponse());
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(1);
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/ban")
+      .set("Cookie", authCookie(hostId))
+      .send({ movieId: banned.toString() });
+
+    expect(res.status).toBe(200);
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(res.body.gameRoom.bans.finished).toBe(false);
+  });
+});
+
+describe("GET /api/game-rooms/:code ban state", () => {
+  const pool = Array.from({ length: 12 }, () => new mongoose.Types.ObjectId());
+
+  const playingRoom = (overrides: Record<string, unknown> = {}) => ({
+    _id: roomId,
+    code: "ABCDEF",
+    host: { _id: hostId, username: "ada" },
+    players: [
+      { _id: hostId, username: "ada" },
+      { _id: otherId, username: "bob" },
+    ],
+    status: "playing",
+    currentRound: "ban",
+    round_finished: false,
+    round_players: [hostId, otherId],
+    remaining_movies: [...pool],
+    ...overrides,
+  });
+
+  it("returns the progress without revealing other players' bans", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    countSubmissions.mockResolvedValue(1);
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.status).toBe(200);
+    expect(res.body.gameRoom.bans).toEqual({
+      submitted: 1,
+      required: 2,
+      finished: false,
+      can_ban: true,
+      block_reason: null,
+      my_movie: null,
+      banned_movies: [],
+    });
+    // only a count, never the rows of the other players
+    expect(findSubmissions).not.toHaveBeenCalled();
+  });
+
+  it("tells a player who already banned that they are locked in", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    countSubmissions.mockResolvedValue(1);
+    findSubmission.mockReturnValue(mockQuery({ choices: [{ movie: { _id: pool[0], title: "A" } }] }));
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.body.gameRoom.bans.can_ban).toBe(false);
+    expect(res.body.gameRoom.bans.block_reason).toBe("You already banned a movie.");
+    expect(res.body.gameRoom.bans.my_movie.title).toBe("A");
+  });
+
+  it("tells a player when the pool is at its minimum", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ remaining_movies: pool.slice(0, 6) })));
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.body.gameRoom.bans.can_ban).toBe(false);
+    expect(res.body.gameRoom.bans.block_reason).toBe("The pool is at its minimum of 6 movies.");
+  });
+
+  it("reveals the banned movies after the round, without who banned them", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom({ round_finished: true })));
+    countSubmissions.mockResolvedValue(2);
+    findSubmissions.mockReturnValue(
+      mockQuery([
+        { choices: [{ movie: { _id: pool[0], title: "A" } }] },
+        { choices: [{ movie: { _id: pool[1], title: "B" } }] },
+      ])
+    );
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.body.gameRoom.bans.finished).toBe(true);
+    expect(res.body.gameRoom.bans.banned_movies.map((movie: { title: string }) => movie.title)).toEqual([
+      "A",
+      "B",
+    ]);
+    expect(res.body.gameRoom.bans.banned_movies[0]).not.toHaveProperty("player");
+  });
+
+  it("does not look at bans while the room is still a lobby", async () => {
+    findOne.mockReturnValue(
+      mockQuery({ _id: roomId, code: "ABCDEF", players: [{ _id: hostId }], status: "lobby" })
+    );
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.status).toBe(200);
+    expect(res.body.gameRoom).not.toHaveProperty("bans");
+    expect(countSubmissions).not.toHaveBeenCalled();
   });
 });
