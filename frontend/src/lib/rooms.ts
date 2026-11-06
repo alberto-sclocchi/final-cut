@@ -15,6 +15,7 @@ export interface GameRoom {
   players: Player[];
   remaining_movies: Movie[]; // empty until the game starts
   status: "lobby" | "playing" | "completed";
+  version: number;
 }
 
 // What every room endpoint sends back.
@@ -22,6 +23,8 @@ interface RoomResponse {
   success: boolean;
   message?: string;
   gameRoom?: GameRoom;
+  changed?: boolean;
+  version?: number;
 }
 
 // Calls a room endpoint and returns the JSON.
@@ -50,8 +53,13 @@ export function joinRoom(code: string) {
 }
 
 // Gets the room's latest info (players, host, status).
-export function getRoom(code: string) {
-  return request("/" + code, "GET");
+export function getRoom(code: string, version?: number) {
+  let path = "/" + code;
+  // sends the version we already have, if any
+  if (version !== undefined) {
+    path = path + "?version=" + version;
+  }
+  return request(path, "GET");
 }
 
 // Starts the game and builds the movie pool. Only works for the host.

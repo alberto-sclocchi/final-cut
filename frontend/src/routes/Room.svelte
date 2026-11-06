@@ -20,7 +20,13 @@
 
   // Gets the latest room info from the backend.
   async function loadRoom() {
-    const res = await getRoom(params.code);
+    // sends the version we already have, so the backend can say nothing changed
+    const res = await getRoom(params.code, room ? room.version : undefined);
+
+    // nothing changed, so keep the screen as it is
+    if (res.success && res.changed === false) {
+      return;
+    }
     if (!res.success || !res.gameRoom) {
       errorMessage = res.message ?? "Could not load the room.";
       return;

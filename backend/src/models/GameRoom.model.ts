@@ -46,6 +46,11 @@ const gameRoomSchema = new Schema(
       ref: "Movie",
       default: null
     },
+    // goes up by 1 every time the room changes, so screens know when to refresh
+    version: {
+      type: Number,
+      default: 0
+    },
     // where the room is in the game, see ROOM_STATUSES above
     status: {
       type: String,
