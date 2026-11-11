@@ -43,6 +43,7 @@
   };
 
   const links = [
+    { href: "/new", label: "Create Room" },
     { href: "/join", label: "Join Room" },
     { href: "/watchlist", label: "Watchlist" },
   ];
