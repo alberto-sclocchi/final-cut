@@ -109,6 +109,7 @@ describe("game room routes need a logged in user", () => {
     ["post", "/api/game-rooms/ABCDEF/leave"],
     ["post", "/api/game-rooms/ABCDEF/start"],
     ["post", "/api/game-rooms/ABCDEF/ban"],
+    ["post", "/api/game-rooms/ABCDEF/hype"],
     ["delete", "/api/game-rooms/ABCDEF"],
   ] as const)("%s %s returns 401 without a token", async (method, url) => {
     const res = await request(app)[method](url);
@@ -461,6 +462,8 @@ describe("POST /api/game-rooms/:code/start", () => {
           round_players: [hostId, otherId],
           round_finished: false,
           winner: null,
+          eliminated_movies: [],
+          hype_results: null,
         },
         $inc: { version: 1 },
       },
@@ -536,8 +539,9 @@ describe("POST /api/game-rooms/:code/start", () => {
     const res = await request(app).post("/api/game-rooms/ABCDEF/start").set("Cookie", authCookie(hostId));
 
     expect(res.status).toBe(200);
-    expect(findOneAndUpdate.mock.calls[0][1].$set.round_finished).toBe(true);
-    expect(findOneAndUpdate.mock.calls[0][1].$set.currentRound).toBe("ban");
+    // nothing can be banned from a pool at the floor, so the game opens on the hype round
+    expect(findOneAndUpdate.mock.calls[0][1].$set.round_finished).toBe(false);
+    expect(findOneAndUpdate.mock.calls[0][1].$set.currentRound).toBe("hype");
   });
 });
 
@@ -787,12 +791,13 @@ describe("POST /api/game-rooms/:code/ban", () => {
     );
   });
 
-  it("finishes the round when the last player bans", async () => {
+  it("finishes the ban round and hands over to the hype round", async () => {
     findOne.mockReturnValue(mockQuery(playingRoom()));
-    findOneAndUpdate.mockReturnValue(banResponse());
+    findOneAndUpdate
+      .mockReturnValueOnce(banResponse())
+      .mockReturnValueOnce(mockQuery({ ...playingRoom(), currentRound: "hype", remaining_movies: pool.slice(1) }));
     createSubmission.mockResolvedValue({});
     countSubmissions.mockResolvedValue(2);
-    updateOne.mockResolvedValue({});
 
     const res = await request(app)
       .post("/api/game-rooms/ABCDEF/ban")
@@ -800,23 +805,33 @@ describe("POST /api/game-rooms/:code/ban", () => {
       .send({ movieId: banned.toString() });
 
     expect(res.status).toBe(200);
-    expect(updateOne).toHaveBeenCalledWith(
-      { _id: roomId, round_finished: false },
-      { $set: { round_finished: true } }
+    // the handover uses the same guard, so two last bans can't re-snapshot the players
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(findOneAndUpdate).toHaveBeenLastCalledWith(
+      { _id: roomId, currentRound: "ban", round_finished: false },
+      {
+        $set: {
+          currentRound: "hype",
+          round_finished: false,
+          round_players: [hostId.toString(), otherId.toString()],
+        },
+        $inc: { version: 1 },
+      },
+      { new: true }
     );
     expect(res.body.gameRoom.bans.finished).toBe(true);
-    // the game stays on the ban round, the next round is a later phase
     expect(res.body.gameRoom.status).toBe("playing");
-    expect(res.body.gameRoom.currentRound).toBe("ban");
+    expect(res.body.gameRoom.currentRound).toBe("hype");
   });
 
-  it("finishes the round when the pool reaches the floor", async () => {
+  it("hands over to the hype round when the pool reaches the floor", async () => {
     const movies = pool.slice(0, 7);
     findOne.mockReturnValue(mockQuery(playingRoom({ remaining_movies: movies, round_players: [hostId, otherId, hostId] })));
-    findOneAndUpdate.mockReturnValue(banResponse(movies.slice(1)));
+    findOneAndUpdate
+      .mockReturnValueOnce(banResponse(movies.slice(1)))
+      .mockReturnValueOnce(mockQuery({ ...playingRoom({ remaining_movies: movies.slice(1) }), currentRound: "hype" }));
     createSubmission.mockResolvedValue({});
     countSubmissions.mockResolvedValue(1);
-    updateOne.mockResolvedValue({});
 
     const res = await request(app)
       .post("/api/game-rooms/ABCDEF/ban")
@@ -824,9 +839,17 @@ describe("POST /api/game-rooms/:code/ban", () => {
       .send({ movieId: movies[0].toString() });
 
     expect(res.status).toBe(200);
-    expect(updateOne).toHaveBeenCalledWith(
-      { _id: roomId, round_finished: false },
-      { $set: { round_finished: true } }
+    expect(findOneAndUpdate).toHaveBeenLastCalledWith(
+      { _id: roomId, currentRound: "ban", round_finished: false },
+      {
+        $set: {
+          currentRound: "hype",
+          round_finished: false,
+          round_players: [hostId.toString(), otherId.toString()],
+        },
+        $inc: { version: 1 },
+      },
+      { new: true }
     );
     expect(res.body.gameRoom.bans.finished).toBe(true);
   });
@@ -938,5 +961,440 @@ describe("GET /api/game-rooms/:code ban state", () => {
     expect(res.status).toBe(200);
     expect(res.body.gameRoom).not.toHaveProperty("bans");
     expect(countSubmissions).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/game-rooms/:code/hype", () => {
+  // a full hype pool: six movies, so the round has two to cut
+  const pool = Array.from({ length: 6 }, () => new mongoose.Types.ObjectId());
+  const movieObjects = pool.map((id, index) => ({ _id: id, title: `Movie ${index}` }));
+
+  const hypeRoom = (overrides: Record<string, unknown> = {}) => ({
+    _id: roomId,
+    host: hostId,
+    players: [hostId, otherId],
+    status: "playing",
+    currentRound: "hype",
+    round_finished: false,
+    round_players: [hostId, otherId],
+    remaining_movies: movieObjects,
+    eliminated_movies: [],
+    hype_results: null,
+    ...overrides,
+  });
+
+  // both players' points add up to 9, 8, 2, 1, 0, 0, so the top four are clear
+  const allSubmissions = [
+    {
+      player: { _id: hostId, username: "ada" },
+      choices: [
+        { movie: movieObjects[0], points: 5 },
+        { movie: movieObjects[1], points: 3 },
+        { movie: movieObjects[2], points: 2 },
+      ],
+    },
+    {
+      player: { _id: otherId, username: "bob" },
+      choices: [
+        { movie: movieObjects[0], points: 4 },
+        { movie: movieObjects[1], points: 5 },
+        { movie: movieObjects[3], points: 1 },
+      ],
+    },
+  ];
+
+  const finishedRoom = {
+    ...hypeRoom(),
+    round_finished: true,
+    remaining_movies: movieObjects.slice(0, 4),
+    eliminated_movies: movieObjects.slice(4),
+    hype_results: {
+      totals: pool.map((id, index) => ({ movie: id, points: [9, 8, 2, 1, 0, 0][index] })),
+      cutoff_tie: false,
+      tied_movies: [],
+    },
+  };
+
+  it("records the player's points as a hype submission", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom()));
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(1);
+    findSubmissions.mockReturnValue(
+      mockQuery([
+        {
+          player: { _id: hostId, username: "ada" },
+          choices: [
+            { movie: movieObjects[0], points: 4 },
+            { movie: movieObjects[1], points: 6 },
+          ],
+        },
+      ])
+    );
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 4, [pool[1].toString()]: 6 } });
+
+    expect(res.status).toBe(200);
+    expect(createSubmission).toHaveBeenCalledWith({
+      room: roomId,
+      round: "hype",
+      player: hostId.toString(),
+      choices: [
+        { movie: pool[0].toString(), points: 4 },
+        { movie: pool[1].toString(), points: 6 },
+      ],
+    });
+    expect(res.body.gameRoom.hype).toMatchObject({
+      submitted: 1,
+      required: 2,
+      finished: false,
+      can_submit: false,
+      block_reason: "You already spent your points in this round.",
+      qualifiers: [],
+      cut_movies: [],
+    });
+    expect(res.body.gameRoom.hype.my_points[0].movie.title).toBe("Movie 0");
+  });
+
+  it.each([
+    ["missing points", {}, "Please enter your points."],
+    ["points that aren't an object", { points: [] }, "Please enter your points."],
+    [
+      "a movie outside the pool",
+      { points: { [new mongoose.Types.ObjectId().toString()]: 10 } },
+      "That movie is not in the pool.",
+    ],
+    ["a badly formatted movie id", { points: { nope: 10 } }, "That movie is not in the pool."],
+    [
+      "negative points",
+      { points: { [pool[0].toString()]: -1, [pool[1].toString()]: 11 } },
+      "Points must be whole numbers 0 or higher",
+    ],
+    [
+      "fractional points",
+      { points: { [pool[0].toString()]: 2.5, [pool[1].toString()]: 7.5 } },
+      "Points must be whole numbers 0 or higher",
+    ],
+    [
+      "a total that isn't 10",
+      { points: { [pool[0].toString()]: 4, [pool[1].toString()]: 5 } },
+      "Points must add up to exactly 10, got 9",
+    ],
+  ])("returns 400 for %s", async (_label, body, message) => {
+    findOne.mockReturnValue(mockQuery(hypeRoom()));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send(body);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ success: false, message });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 to someone who isn't in the room", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom({ players: [hostId] })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(otherId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ success: false, message: "You are not in this room." });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when no room has that code", async () => {
+    findOne.mockReturnValue(mockQuery(null));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ZZZZZZ/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ["lobby", "This game has not started."],
+    ["completed", "This game is already over."],
+  ])("returns 409 for a %s room", async (status, message) => {
+    findOne.mockReturnValue(mockQuery(hypeRoom({ status })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when it is not the hype round", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom({ currentRound: "ban" })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message: "It is not the hype round." });
+  });
+
+  it("returns 409 when the hype round is already over", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom({ round_finished: true })));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ success: false, message: "The hype round is over." });
+    expect(createSubmission).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the player already submitted", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom()));
+    createSubmission.mockRejectedValue(Object.assign(new Error("duplicate key"), { code: 11000 }));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({ points: { [pool[0].toString()]: 10 } });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      message: "You already spent your points in this round.",
+    });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cuts the pool to the top four when the last player submits", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom()));
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(2);
+    findSubmissions.mockReturnValue(mockQuery(allSubmissions));
+    findOneAndUpdate.mockReturnValue(mockQuery(finishedRoom));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({
+        points: {
+          [pool[0].toString()]: 5,
+          [pool[1].toString()]: 3,
+          [pool[2].toString()]: 2,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: roomId, currentRound: "hype", round_finished: false },
+      {
+        $set: {
+          round_finished: true,
+          remaining_movies: pool.slice(0, 4).map((id) => id.toString()),
+          hype_results: {
+            totals: [
+              { movie: pool[0].toString(), points: 9 },
+              { movie: pool[1].toString(), points: 8 },
+              { movie: pool[2].toString(), points: 2 },
+              { movie: pool[3].toString(), points: 1 },
+              { movie: pool[4].toString(), points: 0 },
+              { movie: pool[5].toString(), points: 0 },
+            ],
+            cutoff_tie: false,
+            tied_movies: [],
+          },
+        },
+        $addToSet: { eliminated_movies: { $each: [pool[4].toString(), pool[5].toString()] } },
+        $inc: { version: 1 },
+      },
+      { new: true }
+    );
+    expect(res.body.gameRoom.hype.finished).toBe(true);
+    expect(res.body.gameRoom.hype.qualifiers.map((movie: { title: string }) => movie.title)).toEqual([
+      "Movie 0",
+      "Movie 1",
+      "Movie 2",
+      "Movie 3",
+    ]);
+    expect(res.body.gameRoom.hype.cut_movies.map((movie: { title: string }) => movie.title)).toEqual([
+      "Movie 4",
+      "Movie 5",
+    ]);
+    expect(res.body.gameRoom.hype.totals[0]).toMatchObject({ points: 9 });
+  });
+
+  it("reads the saved results when another request finished the round first", async () => {
+    findOne
+      .mockReturnValueOnce(mockQuery(hypeRoom()))
+      .mockReturnValueOnce(mockQuery(finishedRoom));
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(2);
+    findSubmissions.mockReturnValue(mockQuery(allSubmissions));
+    findOneAndUpdate.mockReturnValue(mockQuery(null));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({
+        points: {
+          [pool[0].toString()]: 5,
+          [pool[1].toString()]: 3,
+          [pool[2].toString()]: 2,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(findOne).toHaveBeenCalledTimes(2);
+    expect(res.body.gameRoom.hype.finished).toBe(true);
+    expect(res.body.gameRoom.hype.qualifiers).toHaveLength(4);
+  });
+
+  it("keeps the round open while submissions are missing", async () => {
+    findOne.mockReturnValue(mockQuery(hypeRoom({ round_players: [hostId, otherId, hostId] })));
+    createSubmission.mockResolvedValue({});
+    countSubmissions.mockResolvedValue(1);
+    findSubmissions.mockReturnValue(mockQuery([allSubmissions[0]]));
+
+    const res = await request(app)
+      .post("/api/game-rooms/ABCDEF/hype")
+      .set("Cookie", authCookie(hostId))
+      .send({
+        points: {
+          [pool[0].toString()]: 5,
+          [pool[1].toString()]: 3,
+          [pool[2].toString()]: 2,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(res.body.gameRoom.hype.finished).toBe(false);
+  });
+});
+
+describe("GET /api/game-rooms/:code hype state", () => {
+  const pool = Array.from({ length: 6 }, () => new mongoose.Types.ObjectId());
+  const movieObjects = pool.map((id, index) => ({ _id: id, title: `Movie ${index}` }));
+
+  const playingRoom = (overrides: Record<string, unknown> = {}) => ({
+    _id: roomId,
+    code: "ABCDEF",
+    host: { _id: hostId, username: "ada" },
+    players: [
+      { _id: hostId, username: "ada" },
+      { _id: otherId, username: "bob" },
+    ],
+    status: "playing",
+    currentRound: "hype",
+    round_finished: false,
+    round_players: [hostId, otherId],
+    remaining_movies: movieObjects,
+    eliminated_movies: [],
+    hype_results: null,
+    ...overrides,
+  });
+
+  it("returns the progress, live allocations and totals", async () => {
+    findOne.mockReturnValue(mockQuery(playingRoom()));
+    findSubmissions.mockReturnValue(
+      mockQuery([
+        {
+          player: { _id: otherId, username: "bob" },
+          choices: [
+            { movie: movieObjects[0], points: 6 },
+            { movie: movieObjects[1], points: 4 },
+          ],
+        },
+      ])
+    );
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.status).toBe(200);
+    expect(res.body.gameRoom.hype).toMatchObject({
+      submitted: 1,
+      required: 2,
+      finished: false,
+      can_submit: true,
+      block_reason: null,
+      my_points: [],
+      qualifiers: [],
+      cut_movies: [],
+      cutoff_tie: false,
+    });
+    expect(res.body.gameRoom.hype.allocations).toEqual([
+      {
+        player: { _id: otherId.toString(), username: "bob" },
+        points: [
+          { movie: pool[0].toString(), points: 6 },
+          { movie: pool[1].toString(), points: 4 },
+        ],
+      },
+    ]);
+    // someone else's points are visible, and totals start at zero for every pool movie
+    expect(res.body.gameRoom.hype.totals).toHaveLength(6);
+    expect(res.body.gameRoom.hype.totals[0]).toMatchObject({ points: 6 });
+    expect(res.body.gameRoom.hype.totals[0].movie.title).toBe("Movie 0");
+    expect(res.body.gameRoom).not.toHaveProperty("bans");
+  });
+
+  it("does not add hype state during the ban round", async () => {
+    findOne.mockReturnValue(mockQuery({ ...playingRoom(), currentRound: "ban" }));
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.status).toBe(200);
+    expect(res.body.gameRoom).not.toHaveProperty("hype");
+    expect(res.body.gameRoom).toHaveProperty("bans");
+  });
+
+  it("returns the survivors, cuts and tiebreak once the round is over", async () => {
+    findOne.mockReturnValue(
+      mockQuery(
+        playingRoom({
+          round_finished: true,
+          remaining_movies: movieObjects.slice(0, 4),
+          eliminated_movies: movieObjects.slice(4),
+          hype_results: {
+            totals: pool.map((id, index) => ({ movie: id, points: [9, 8, 2, 1, 0, 0][index] })),
+            cutoff_tie: true,
+            tied_movies: [pool[3], pool[4]],
+          },
+        })
+      )
+    );
+    findSubmissions.mockReturnValue(mockQuery([]));
+
+    const res = await request(app).get("/api/game-rooms/ABCDEF").set("Cookie", authCookie(hostId));
+
+    expect(res.body.gameRoom.hype.finished).toBe(true);
+    expect(res.body.gameRoom.hype.qualifiers.map((movie: { title: string }) => movie.title)).toEqual([
+      "Movie 0",
+      "Movie 1",
+      "Movie 2",
+      "Movie 3",
+    ]);
+    expect(res.body.gameRoom.hype.cut_movies.map((movie: { title: string }) => movie.title)).toEqual([
+      "Movie 4",
+      "Movie 5",
+    ]);
+    expect(res.body.gameRoom.hype.cutoff_tie).toBe(true);
+    expect(res.body.gameRoom.hype.tied_movies.map((movie: { title: string }) => movie.title)).toEqual([
+      "Movie 3",
+      "Movie 4",
+    ]);
+    expect(res.body.gameRoom.hype.can_submit).toBe(false);
+    expect(res.body.gameRoom.hype.block_reason).toBe("The hype round is over.");
   });
 });

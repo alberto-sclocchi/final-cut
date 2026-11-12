@@ -33,9 +33,9 @@
     }
     errorMessage = "";
 
-    // Everyone moves to the ban room as soon as the host starts the game.
+    // Everyone moves to the first round as soon as the host starts the game.
     if (res.gameRoom.status === "playing") {
-      goToBanRoom();
+      goToRound(res.gameRoom.currentRound);
       return;
     }
 
@@ -47,8 +47,9 @@
   }
 
   // replace instead of push so the back button doesn't return to the waiting room
-  function goToBanRoom() {
-    replace("/room/" + params.code + "/ban");
+  function goToRound(round: string) {
+    const path = round === "hype" ? "/hype" : "/ban";
+    replace("/room/" + params.code + path);
   }
 
   // Starts the game. The backend decides if it can start and sends back why not.
@@ -62,7 +63,7 @@
       startError = res.message ?? "Could not start the game.";
       return;
     }
-    goToBanRoom();
+    goToRound(res.gameRoom?.currentRound ?? "ban");
   }
 
   // Leaves the room and goes back home.

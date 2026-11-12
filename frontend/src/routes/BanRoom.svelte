@@ -49,6 +49,12 @@
       return;
     }
 
+    // The ban round is over, the hype round has its own screen.
+    if (res.gameRoom.currentRound === "hype") {
+      replace("/room/" + params.code + "/hype");
+      return;
+    }
+
     errorMessage = "";
 
     // Someone else can ban the movie you were about to pick, so drop a stale selection.
@@ -157,7 +163,7 @@
       </ul>
 
       <p class="mt-8 text-center text-sm text-neutral-500">
-        The ban round is over. Waiting for the next round...
+        The ban round is over. Moving to the hype round...
       </p>
     {:else if waiting}
       <!-- Bans are secret, so there is nothing to show but the progress. -->

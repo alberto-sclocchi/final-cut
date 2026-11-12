@@ -13,6 +13,7 @@
   import NewRoom from "./routes/NewRoom.svelte";
   import Room from "./routes/Room.svelte";
   import BanRoom from "./routes/BanRoom.svelte";
+  import HypeRoom from "./routes/HypeRoom.svelte";
   import { auth, loadUser, logOut } from "./lib/auth.svelte";
 
   // on page load/refresh, check if the cookie still logs us in
@@ -40,6 +41,7 @@
     "/new": protect(NewRoom),
     "/room/:code": protect(Room),
     "/room/:code/ban": protect(BanRoom),
+    "/room/:code/hype": protect(HypeRoom),
   };
 
   const links = [

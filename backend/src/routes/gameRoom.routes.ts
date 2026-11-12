@@ -7,6 +7,7 @@ import {
   leaveGameRoom,
   startGameRoom,
   banMovie,
+  hypeMovie,
   deleteGameRoom,
 } from "../controllers/gameRoom.controller";
 import { isAuthenticated } from "../middleware/isAuthenticated";
@@ -34,6 +35,9 @@ router.post("/:code/start", isAuthenticated, startGameRoom);
 
 // POST /api/game-rooms/:code/ban
 router.post("/:code/ban", isAuthenticated, banMovie);
+
+// POST /api/game-rooms/:code/hype
+router.post("/:code/hype", isAuthenticated, hypeMovie);
 
 // DELETE /api/game-rooms/:code
 router.delete("/:code", isAuthenticated, deleteGameRoom);
