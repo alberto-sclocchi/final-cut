@@ -43,9 +43,11 @@
 
   function scheduleFinalTransition(nextRoom: GameRoom) {
     if (transitionTimer) clearTimeout(transitionTimer);
-    if (!nextRoom.hype?.finished || !nextRoom.final_starts_at) return;
+    // the next round is head to head when there were 4 qualifiers, otherwise the final
+    const startsAt = nextRoom.h2h_starts_at ?? nextRoom.final_starts_at;
+    if (!nextRoom.hype?.finished || !startsAt) return;
 
-    const delay = Math.max(0, new Date(nextRoom.final_starts_at).getTime() - Date.now());
+    const delay = Math.max(0, new Date(startsAt).getTime() - Date.now());
     transitionTimer = setTimeout(loadRoom, delay);
   }
 
@@ -60,6 +62,11 @@
 
     if (!res.success || !res.gameRoom) {
       errorMessage = res.message ?? "Could not load the room.";
+      return;
+    }
+
+    if (res.gameRoom.currentRound === "headToHead") {
+      replace("/room/" + params.code + "/head-to-head");
       return;
     }
 
@@ -228,7 +235,10 @@
     <p class="m-auto text-lg text-slate-600">Loading...</p>
   {:else}
     {#if hype.finished}
-      <TransitionCountdown endsAt={room.final_starts_at} label="Final Cut starts" />
+      <TransitionCountdown
+        endsAt={room.h2h_starts_at ?? room.final_starts_at}
+        label={room.h2h_starts_at ? "Head to Head starts" : "Final Cut starts"}
+      />
     {/if}
 
     <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
