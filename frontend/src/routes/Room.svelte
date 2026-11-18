@@ -12,11 +12,15 @@
   // Separate from errorMessage, because every successful refresh clears that one.
   let startError = $state("");
   let starting = $state(false);
+  let copied = $state(false);
 
   let isHost = $derived(!!room && !!auth.user && auth.user._id === room.host._id);
 
   // How often the page checks for new players, in milliseconds.
   const REFRESH_MS = 2000;
+
+  // Puts the "Copied!" label back after a moment.
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Gets the latest room info from the backend.
   async function loadRoom() {
@@ -72,12 +76,29 @@
     push("/");
   }
 
+  // Copies the code so it can be pasted into a chat.
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(params.code.toUpperCase());
+    } catch {
+      // the clipboard can be blocked, and the code is on screen anyway
+      return;
+    }
+
+    copied = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (copied = false), 2000);
+  }
+
   // Loads the room now, then every 2 seconds so new players show up.
   onMount(() => {
     loadRoom();
     const timer = setInterval(loadRoom, REFRESH_MS);
-    // Stops the timer when the user leaves this page.
-    return () => clearInterval(timer);
+    // Stops the timers when the user leaves this page.
+    return () => {
+      clearInterval(timer);
+      if (copyTimer) clearTimeout(copyTimer);
+    };
   });
 </script>
 
@@ -90,6 +111,13 @@
     <div class="text-center">
       <p class="text-xs font-semibold tracking-widest text-orange-700 uppercase">Room code</p>
       <p class="mt-1 text-3xl font-extrabold tracking-[0.35em]">{params.code.toUpperCase()}</p>
+      <button
+        type="button"
+        onclick={copyCode}
+        class="mt-3 cursor-pointer rounded-lg border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-stone-200"
+      >
+        <span aria-live="polite">{copied ? "Copied!" : "Copy code"}</span>
+      </button>
     </div>
 
     {#if errorMessage}
@@ -121,7 +149,11 @@
 
       <p class="mt-8 flex items-center justify-center gap-2 text-sm text-neutral-500">
         <span class="size-2 animate-pulse rounded-full bg-orange-700"></span>
-        Waiting for the {#if auth.user && auth.user._id === room.host._id}YOU{:else}{room.host.username}{/if} to start...
+        {#if auth.user && auth.user._id === room.host._id}
+          Waiting for you to start...
+        {:else}
+          Waiting for {room.host.username} to start...
+        {/if}
       </p>
     {/if}
 

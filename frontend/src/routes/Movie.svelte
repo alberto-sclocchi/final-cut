@@ -20,26 +20,24 @@
   <title>{movie ? `${movie.title} | Final Cut` : "Final Cut"}</title>
 </svelte:head>
 
-<div
-  class="flex flex-1 items-center justify-center bg-slate-600 rounded-md m-1"
->
+<div class="m-1 flex flex-1 items-center justify-center rounded-md bg-slate-600 p-4 sm:p-8">
   {#if movieState.loading}
     <p class="text-slate-200 text-lg">Loading...</p>
   {:else if movieState.error || !movie}
     <p class="text-red-200 text-lg">{movieState.error || "Movie not found."}</p>
   {:else}
   <div
-    class="flex gap-10 p-10 bg-slate-900 text-slate-100 rounded-xl shadow-2xl w-3/4 aspect-video"
+    class="flex w-full max-w-4xl flex-col gap-6 rounded-xl bg-slate-900 p-5 text-slate-100 shadow-2xl sm:flex-row sm:gap-10 sm:p-10"
   >
     {#if movie.posterUrl}
       <img
         alt="{movie.title} poster"
         src={movie.posterUrl}
-        class="h-full aspect-2/3 object-cover rounded-lg shadow-lg"
+        class="mx-auto aspect-[2/3] w-40 shrink-0 rounded-lg object-cover shadow-lg sm:mx-0 sm:w-56"
       />
     {:else}
       <div
-        class="h-full aspect-2/3 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 text-base"
+        class="mx-auto flex aspect-[2/3] w-40 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-base text-slate-500 sm:mx-0 sm:w-56"
       >
         No poster
       </div>
@@ -47,7 +45,7 @@
     <div class="flex flex-col justify-center gap-5 min-w-0">
       <div class="flex items-start gap-4">
         <div class="min-w-0">
-          <h1 class="text-5xl font-bold tracking-tight">{movie.title}</h1>
+          <h1 class="text-3xl font-bold tracking-tight text-balance sm:text-5xl">{movie.title}</h1>
           <p class="text-slate-400 text-lg mt-2">{year}</p>
         </div>
         {#if auth.user}
@@ -78,7 +76,7 @@
         {/each}
       </div>
       <p
-        class="text-slate-300 text-lg leading-relaxed text-pretty max-w-prose line-clamp-5"
+        class="line-clamp-5 max-w-prose text-base leading-relaxed text-pretty text-slate-300 sm:text-lg"
       >
         {movie.overview}
       </p>

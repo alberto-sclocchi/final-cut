@@ -15,8 +15,8 @@
     {
       title: "Form the pool",
       text: "Film options are taken from everyone's watchlist.",
-      href: "#/movies",
-      cta: "Browse movies",
+      href: "#/watchlist",
+      cta: "Open watchlist",
     },
   ];
 

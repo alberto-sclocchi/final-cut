@@ -97,7 +97,7 @@
 
   {#if focused}
     <div
-      class="absolute right-0 top-full z-10 mt-2 w-80 overflow-hidden rounded-lg bg-stone-100 shadow-xl ring-1 ring-black/5"
+      class="absolute right-0 top-full z-10 mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-lg bg-stone-100 shadow-xl ring-1 ring-black/5"
     >
       <p
         class="px-3 pb-1 pt-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500"

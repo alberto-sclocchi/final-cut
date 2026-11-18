@@ -61,21 +61,23 @@
 </script>
 
 <div class="bg-[#B87458] min-h-svh w-full flex flex-col text-neutral-700">
-  <nav class="flex h-14 w-full items-center gap-8 px-6 font-medium">
-    <a href="#/" class="text-lg font-bold tracking-tight text-stone-100"
+  <nav
+    class="flex w-full flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 font-medium sm:h-14 sm:flex-nowrap sm:gap-8 sm:px-6 sm:py-0"
+  >
+    <a href="#/" class="shrink-0 text-lg font-bold tracking-tight text-stone-100"
       >Final Cut</a
     >
-    <div class="flex items-center gap-1">
+    <div class="flex flex-wrap items-center gap-1">
       {#each links as link (link.href)}
         <a
           href="#{link.href}"
           use:active={{ path: link.href, className: "nav-active" }}
-          class="rounded-md px-3 py-1.5 text-stone-100/90 transition-colors hover:bg-stone-200/20 hover:text-stone-100"
+          class="rounded-md px-2 py-1.5 text-stone-100/90 transition-colors hover:bg-stone-200/20 hover:text-stone-100 sm:px-3"
           >{link.label}</a
         >
       {/each}
     </div>
-    <div class="ml-auto flex items-center gap-3">
+    <div class="ml-auto flex items-center gap-2 sm:gap-3">
       <SearchBar />
       {#if auth.user}
         <span class="text-stone-100"
