@@ -59,6 +59,26 @@ export interface FinalState {
   votes: { movie: Movie; votes: number }[];
 }
 
+// One head to head matchup. Votes are public in this round.
+export interface Matchup {
+  a: Movie;
+  b: Movie;
+  voters_a: string[]; // usernames who picked a
+  voters_b: string[]; // usernames who picked b
+  winner: string | null; // movie id, only set once the round is over
+}
+
+// The head to head round info GET /api/game-rooms/:code adds while that round is being played.
+export interface HeadToHeadState {
+  matchups: Matchup[];
+  submitted: number;
+  required: number;
+  finished: boolean;
+  can_vote: boolean;
+  block_reason: string | null;
+  my_picks: string[]; // movie ids, one per matchup
+}
+
 // A game room as GET /api/game-rooms/:code sends it back.
 export interface GameRoom {
   _id: string;
@@ -70,10 +90,12 @@ export interface GameRoom {
   currentRound: "ban" | "hype" | "headToHead" | "wildcard" | "final";
   round_finished: boolean;
   final_starts_at?: string | null;
+  h2h_starts_at?: string | null;
   ban_reveal_until?: string | null;
   eliminated_movies?: Movie[]; // hype cuts, kept for a possible revival round
   bans?: BanState; // only sent while the room is playing the ban round
   hype?: HypeState; // only sent while the room is playing the hype round
+  headToHead?: HeadToHeadState; // only sent while the room is playing the head to head round
   final?: FinalState; // only sent during or after the final round
   version: number;
 }
@@ -135,6 +157,11 @@ export function banMovie(code: string, movieId: string) {
 // Spends the player's 10 points in the hype round. Only works once per player, and can't be undone.
 export function submitHype(code: string, points: Record<string, number>) {
   return request("/" + code + "/hype", "POST", { points: points });
+}
+
+// Picks one movie in each head to head matchup. Only works once per player.
+export function voteHeadToHead(code: string, picks: string[]) {
+  return request("/" + code + "/head-to-head", "POST", { picks: picks });
 }
 
 // Votes for one of the two finalists. Only works once per player.

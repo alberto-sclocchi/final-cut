@@ -1260,8 +1260,13 @@ describe("POST /api/game-rooms/:code/hype", () => {
         $set: {
           round_finished: true,
           remaining_movies: pool.slice(0, 4).map((id) => id.toString()),
-          final_movies: pool.slice(0, 2).map((id) => id.toString()),
-          final_starts_at: expect.any(Date),
+          final_movies: [],
+          final_starts_at: null,
+          h2h_matchups: [
+            { a: pool[0].toString(), b: pool[3].toString() },
+            { a: pool[1].toString(), b: pool[2].toString() },
+          ],
+          h2h_starts_at: expect.any(Date),
           hype_results: {
             totals: [
               { movie: pool[0].toString(), points: 9 },

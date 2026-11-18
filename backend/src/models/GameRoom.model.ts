@@ -73,6 +73,23 @@ const gameRoomSchema = new Schema(
       type: hypeResultsSchema,
       default: null
     },
+    // the head to head matchups, filled when the hype round ends. The winner of each moves on
+    h2h_matchups: {
+      type: [
+        {
+          _id: false,
+          a: { type: Schema.Types.ObjectId, ref: "Movie", required: true },
+          b: { type: Schema.Types.ObjectId, ref: "Movie", required: true },
+          winner: { type: Schema.Types.ObjectId, ref: "Movie", default: null }
+        }
+      ],
+      default: []
+    },
+    // when the head to head round becomes available
+    h2h_starts_at: {
+      type: Date,
+      default: null
+    },
     // the two highest-scoring hype qualifiers and when the final round becomes available
     final_movies: {
       type: [{ type: Schema.Types.ObjectId, ref: "Movie" }],

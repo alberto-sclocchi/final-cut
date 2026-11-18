@@ -4,6 +4,7 @@ import User from "../models/User.model";
 import Movie from "../models/Movie.model";
 import Submission from "../models/Submission.model";
 import { buildPool } from "../services/pool";
+import { pickMatchupWinner } from "../services/headToHead";
 import { MIN_POOL_SIZE, banRefusal, isBanRoundFinished } from "../services/ban";
 import {
   hypeRefusal,
@@ -226,6 +227,82 @@ async function getFinalState(room: any, userId: any) {
       ? finalists.map((movie) => ({ movie, votes: counts[movieIdOf(movie)] ?? 0 }))
       : [],
   };
+}
+
+// What the head to head screen needs to know. Votes are public in this round.
+async function getHeadToHeadState(room: any, userId: any) {
+  const submissions: any[] = await Submission.find({ room: room._id, round: "headToHead" })
+    .populate("player", PLAYER_FIELDS);
+
+  // the movies are already loaded on the room, so look them up by id
+  const moviesById = new Map<string, any>();
+  for (const movie of [...(room.remaining_movies ?? []), ...(room.eliminated_movies ?? [])]) {
+    moviesById.set(movieIdOf(movie), movie);
+  }
+
+  const mySubmission = submissions.find((submission) => playerIdOf(submission.player) === String(userId));
+
+  const matchups = (room.h2h_matchups ?? []).map((matchup: any, index: number) => {
+    const aId = movieIdOf(matchup.a);
+    const bId = movieIdOf(matchup.b);
+    const votersA: string[] = [];
+    const votersB: string[] = [];
+
+    // each submission has one pick per matchup, in matchup order
+    for (const submission of submissions) {
+      const pick = submission.choices?.[index]?.movie;
+      if (!pick) continue;
+      if (movieIdOf(pick) === aId) votersA.push(submission.player?.username);
+      if (movieIdOf(pick) === bId) votersB.push(submission.player?.username);
+    }
+
+    return {
+      a: moviesById.get(aId) ?? { _id: aId },
+      b: moviesById.get(bId) ?? { _id: bId },
+      voters_a: votersA,
+      voters_b: votersB,
+      winner: matchup.winner ? movieIdOf(matchup.winner) : null,
+    };
+  });
+
+  let blockReason: string | null = null;
+  if (room.status !== "playing" || room.currentRound !== "headToHead" || room.round_finished) {
+    blockReason = "The head to head round is over.";
+  } else if (mySubmission) {
+    blockReason = "You already voted in this round.";
+  } else if (!(room.round_players ?? []).some((player: any) => playerIdOf(player) === String(userId))) {
+    blockReason = "You are not part of this round.";
+  }
+
+  return {
+    matchups,
+    submitted: submissions.length,
+    required: room.round_players?.length ?? 0,
+    finished: !!room.round_finished,
+    can_vote: blockReason === null,
+    block_reason: blockReason,
+    my_picks: (mySubmission?.choices ?? []).map((choice: any) => movieIdOf(choice.movie)),
+  };
+}
+
+// Moves a room to the next round once its timer has passed. The filter means only one poll can move it
+async function moveToRound(room: any, fromRound: string, toRound: string, timerField: string) {
+  await GameRoom.updateOne(
+    { _id: room._id, currentRound: fromRound, round_finished: true, [timerField]: { $lte: new Date() } },
+    {
+      $set: { currentRound: toRound, round_finished: false, round_players: room.players.map(playerIdOf) },
+      $inc: { version: 1 },
+    }
+  );
+
+  // read it back either way, since another player's poll may have moved it first
+  return GameRoom.findOne({ _id: room._id })
+    .populate("host", PLAYER_FIELDS)
+    .populate("players", PLAYER_FIELDS)
+    .populate("remaining_movies")
+    .populate("eliminated_movies")
+    .populate("final_movies")
+    .populate("winner");
 }
 
 // POST /api/game-rooms
@@ -464,6 +541,28 @@ export const getGameRoom = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
+    // Head to Head starts ten seconds after the hype results are saved, when there were 4 qualifiers.
+    if (
+      foundRoom.status === "playing" &&
+      foundRoom.currentRound === "hype" &&
+      foundRoom.round_finished &&
+      foundRoom.h2h_starts_at &&
+      new Date(foundRoom.h2h_starts_at).getTime() <= Date.now()
+    ) {
+      foundRoom = await moveToRound(foundRoom, "hype", "headToHead", "h2h_starts_at");
+    }
+
+    // The final starts ten seconds after the head to head winners are saved.
+    if (
+      foundRoom.status === "playing" &&
+      foundRoom.currentRound === "headToHead" &&
+      foundRoom.round_finished &&
+      foundRoom.final_starts_at &&
+      new Date(foundRoom.final_starts_at).getTime() <= Date.now()
+    ) {
+      foundRoom = await moveToRound(foundRoom, "headToHead", "final", "final_starts_at");
+    }
+
     // the screen already has this version, so just say nothing changed
     if (foundRoom.version === Number(req.query.version)) {
       res.status(200).json({ success: true, changed: false, version: foundRoom.version });
@@ -480,6 +579,8 @@ export const getGameRoom = async (req: Request, res: Response, next: NextFunctio
     const roundState =
       foundRoom.currentRound === "hype"
         ? { hype: await getHypeState(foundRoom, req.payload!._id) }
+        : foundRoom.currentRound === "headToHead"
+        ? { headToHead: await getHeadToHeadState(foundRoom, req.payload!._id) }
         : foundRoom.currentRound === "final"
           ? { final: await getFinalState(foundRoom, req.payload!._id) }
           : { bans: await getBanState(foundRoom, req.payload!._id) };
@@ -884,10 +985,19 @@ export const hypeMovie = async (req: Request, res: Response, next: NextFunction)
     const { qualifiers, cutoffTie, tied } = pickQualifiers(totals, poolIds);
     const survivorIds = new Set(qualifiers);
     const cutIds = poolIds.filter((movieId) => !survivorIds.has(movieId));
-    const finalIds = [...qualifiers]
-      .sort((a, b) => (totals[b] ?? 0) - (totals[a] ?? 0))
-      .slice(0, 2);
-    const finalStartsAt = new Date(Date.now() + FINAL_DELAY_MS);
+    // qualifiers ranked by points, best first
+    const ranked = [...qualifiers].sort((a, b) => (totals[b] ?? 0) - (totals[a] ?? 0));
+
+    // with 4 qualifiers, play head to head: 1st vs 4th and 2nd vs 3rd. Otherwise go straight to the final
+    const playHeadToHead = ranked.length === 4;
+    const matchups = playHeadToHead
+      ? [
+          { a: ranked[0], b: ranked[3] },
+          { a: ranked[1], b: ranked[2] },
+        ]
+      : [];
+    const finalIds = playHeadToHead ? [] : ranked.slice(0, 2);
+    const nextStartsAt = new Date(Date.now() + FINAL_DELAY_MS);
 
     // the guard means only one request can finish the round, so the tiebreak is only drawn once
     const finishedRoom: any = await GameRoom.findOneAndUpdate(
@@ -897,7 +1007,9 @@ export const hypeMovie = async (req: Request, res: Response, next: NextFunction)
           round_finished: true,
           remaining_movies: poolIds.filter((movieId) => survivorIds.has(movieId)),
           final_movies: finalIds,
-          final_starts_at: finalStartsAt,
+          final_starts_at: playHeadToHead ? null : nextStartsAt,
+          h2h_matchups: matchups,
+          h2h_starts_at: playHeadToHead ? nextStartsAt : null,
           hype_results: {
             totals: poolIds.map((movieId) => ({ movie: movieId, points: totals[movieId] ?? 0 })),
             cutoff_tie: cutoffTie,
@@ -927,6 +1039,151 @@ export const hypeMovie = async (req: Request, res: Response, next: NextFunction)
 
     const hype = await getHypeState(finishedRoom, userId, true);
     res.status(200).json({ success: true, gameRoom: { ...asPlain(finishedRoom), hype } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/game-rooms/:code/head-to-head
+// records one pick per matchup for the logged in player, then picks the winners once everyone has voted
+export const headToHeadVote = async (req: Request, res: Response, next: NextFunction) => {
+  const code = normalizeCode(req.params.code);
+  const userId = req.payload!._id;
+
+  if (!code) {
+    res.status(400).json({ success: false, message: "Please provide a room code." });
+    return;
+  }
+
+  // one movie id per matchup, in matchup order
+  const picks: (string | null)[] | null = Array.isArray(req.body?.picks)
+    ? req.body.picks.map(normalizeMovieId)
+    : null;
+
+  if (!picks) {
+    res.status(400).json({ success: false, message: "Please pick a movie in every matchup." });
+    return;
+  }
+
+  try {
+    const foundRoom: any = await GameRoom.findOne({ code })
+      .select("players status currentRound round_finished round_players remaining_movies eliminated_movies h2h_matchups hype_results")
+      .populate("remaining_movies")
+      .populate("eliminated_movies");
+
+    if (!foundRoom) {
+      res.status(404).json({ success: false, message: "Room not found." });
+      return;
+    }
+
+    if (!foundRoom.players.some((player: any) => playerIdOf(player) === String(userId))) {
+      res.status(403).json({ success: false, message: "You are not in this room." });
+      return;
+    }
+
+    if (foundRoom.status !== "playing") {
+      const message = foundRoom.status === "lobby" ? "This game has not started." : "This game is already over.";
+      res.status(409).json({ success: false, message });
+      return;
+    }
+
+    if (foundRoom.currentRound !== "headToHead") {
+      res.status(409).json({ success: false, message: "It is not the head to head round." });
+      return;
+    }
+
+    if (foundRoom.round_finished) {
+      res.status(409).json({ success: false, message: "The head to head round is over." });
+      return;
+    }
+
+    if (!(foundRoom.round_players ?? []).some((player: any) => playerIdOf(player) === String(userId))) {
+      res.status(403).json({ success: false, message: "You are not part of this round." });
+      return;
+    }
+
+    const matchups: any[] = foundRoom.h2h_matchups ?? [];
+
+    // every matchup needs exactly one pick
+    if (matchups.length === 0 || picks.length !== matchups.length) {
+      res.status(400).json({ success: false, message: "Please pick a movie in every matchup." });
+      return;
+    }
+
+    // each pick has to be one of that matchup's two movies
+    for (let index = 0; index < matchups.length; index++) {
+      const pick = picks[index];
+      if (pick !== movieIdOf(matchups[index].a) && pick !== movieIdOf(matchups[index].b)) {
+        res.status(400).json({ success: false, message: "That movie is not in this matchup." });
+        return;
+      }
+    }
+
+    // the unique index on (room, round, player) is what locks the votes
+    try {
+      await Submission.create({
+        room: foundRoom._id,
+        round: "headToHead",
+        player: userId,
+        choices: picks.map((movieId) => ({ movie: movieId })),
+      });
+    } catch (err) {
+      if (!isDuplicateKey(err)) throw err;
+      res.status(409).json({ success: false, message: "You already voted in this round." });
+      return;
+    }
+
+    const submitted = await Submission.countDocuments({ room: foundRoom._id, round: "headToHead" });
+    const required = foundRoom.round_players?.length ?? 0;
+
+    if (submitted >= required) {
+      const submissions: any[] = await Submission.find({ room: foundRoom._id, round: "headToHead" });
+      const hypePoints = Object.fromEntries(
+        (foundRoom.hype_results?.totals ?? []).map((row: any) => [movieIdOf(row.movie), row.points ?? 0])
+      ) as Record<string, number>;
+
+      // each matchup is decided by the picks made for it
+      const results = matchups.map((matchup, index) => {
+        const aId = movieIdOf(matchup.a);
+        const bId = movieIdOf(matchup.b);
+        const matchupPicks = submissions
+          .map((submission) => submission.choices?.[index]?.movie)
+          .filter(Boolean)
+          .map(movieIdOf);
+        const winnerId = pickMatchupWinner(aId, bId, matchupPicks, hypePoints);
+        return { a: aId, b: bId, winner: winnerId, loser: winnerId === aId ? bId : aId };
+      });
+
+      const winnerIds = results.map((result) => result.winner);
+      const loserIds = results.map((result) => result.loser);
+
+      // the filter means only one request can finish the round, so a tie is only drawn once
+      await GameRoom.updateOne(
+        { _id: foundRoom._id, currentRound: "headToHead", round_finished: false },
+        {
+          $set: {
+            round_finished: true,
+            h2h_matchups: results.map((result) => ({ a: result.a, b: result.b, winner: result.winner })),
+            remaining_movies: winnerIds,
+            final_movies: winnerIds,
+            final_starts_at: new Date(Date.now() + FINAL_DELAY_MS),
+          },
+          $addToSet: { eliminated_movies: { $each: loserIds } },
+          $inc: { version: 1 },
+        }
+      );
+    } else {
+      // tells the other screens a new vote came in
+      await GameRoom.updateOne({ _id: foundRoom._id }, { $inc: { version: 1 } });
+    }
+
+    const updatedRoom: any = await GameRoom.findOne({ _id: foundRoom._id })
+      .populate("players", PLAYER_FIELDS)
+      .populate("remaining_movies")
+      .populate("eliminated_movies");
+
+    const headToHead = await getHeadToHeadState(updatedRoom, userId);
+    res.status(200).json({ success: true, gameRoom: { ...asPlain(updatedRoom), headToHead } });
   } catch (err) {
     next(err);
   }

@@ -52,7 +52,8 @@
 
   // replace instead of push so the back button doesn't return to the waiting room
   function goToRound(round: string) {
-    const path = round === "hype" ? "/hype" : "/ban";
+    const paths: Record<string, string> = { ban: "/ban", hype: "/hype", headToHead: "/head-to-head", final: "/final" };
+    const path = paths[round] ?? "/ban";
     replace("/room/" + params.code + path);
   }
 

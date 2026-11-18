@@ -31,11 +31,10 @@
     }
 
     if (res.gameRoom.currentRound !== "final") {
-      replace(
-        res.gameRoom.currentRound === "hype"
-          ? "/room/" + params.code + "/hype"
-          : "/room/" + params.code
-      );
+      // sends players to the screen for the round the room is on
+      const paths: Record<string, string> = { ban: "/ban", hype: "/hype", headToHead: "/head-to-head" };
+      const path = res.gameRoom.status === "playing" ? paths[res.gameRoom.currentRound] ?? "" : "";
+      replace("/room/" + params.code + path);
       return;
     }
 

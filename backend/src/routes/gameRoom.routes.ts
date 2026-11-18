@@ -9,6 +9,7 @@ import {
   banMovie,
   hypeMovie,
   finalVote,
+  headToHeadVote,
   deleteGameRoom,
 } from "../controllers/gameRoom.controller";
 import { isAuthenticated } from "../middleware/isAuthenticated";
@@ -39,6 +40,9 @@ router.post("/:code/ban", isAuthenticated, banMovie);
 
 // POST /api/game-rooms/:code/hype
 router.post("/:code/hype", isAuthenticated, hypeMovie);
+
+// POST /api/game-rooms/:code/head-to-head
+router.post("/:code/head-to-head", isAuthenticated, headToHeadVote);
 
 // POST /api/game-rooms/:code/final
 router.post("/:code/final", isAuthenticated, finalVote);

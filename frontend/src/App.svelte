@@ -15,6 +15,7 @@
   import BanRoom from "./routes/BanRoom.svelte";
   import HypeRoom from "./routes/HypeRoom.svelte";
   import FinalRoom from "./routes/FinalRoom.svelte";
+  import HeadToHeadRoom from "./routes/HeadToHeadRoom.svelte";
   import Profile from "./routes/Profile.svelte";
   import { auth, loadUser, logOut } from "./lib/auth.svelte";
 
@@ -44,6 +45,7 @@
     "/room/:code": protect(Room),
     "/room/:code/ban": protect(BanRoom),
     "/room/:code/hype": protect(HypeRoom),
+    "/room/:code/head-to-head": protect(HeadToHeadRoom),
     "/room/:code/final": protect(FinalRoom),
     "/profile": protect(Profile),
   };
