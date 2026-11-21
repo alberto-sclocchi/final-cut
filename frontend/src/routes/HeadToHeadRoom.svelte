@@ -121,7 +121,7 @@
 {#snippet contender(index: number, movie: Movie, voters: string[], winner: string | null)}
   {@const picked = picks[index] === movie._id || h2h?.my_picks[index] === movie._id}
   {@const lost = !!winner && winner !== movie._id}
-  <div class="flex flex-col gap-2 {lost ? 'opacity-50' : ''}">
+  <div class="mx-auto flex w-full max-w-[200px] flex-col gap-2 {lost ? 'opacity-50' : ''}">
     {#if h2h?.can_vote}
       <button
         type="button"
@@ -216,7 +216,7 @@
           <h2 class="mb-3 text-xs font-semibold tracking-widest text-orange-700 uppercase">
             Matchup {index + 1}
           </h2>
-          <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+          <div class="mx-auto grid max-w-xl grid-cols-[1fr_auto_1fr] items-center gap-4">
             {@render contender(index, matchup.a, matchup.voters_a, matchup.winner)}
             <span class="text-sm font-black text-slate-500">VS</span>
             {@render contender(index, matchup.b, matchup.voters_b, matchup.winner)}
