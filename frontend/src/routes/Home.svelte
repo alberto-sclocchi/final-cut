@@ -23,6 +23,7 @@
   const rounds = [
     { name: "BAN", text: "Silently ban a film you don't want." },
     { name: "HYPE", text: "Films with the most points move on." },
+    { name: "HEAD TO HEAD", text: "Vote between the remaining four." },
     { name: "FINAL CUT", text: "A final secret vote decides the victor." },
   ];
 
