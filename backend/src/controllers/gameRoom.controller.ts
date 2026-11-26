@@ -286,9 +286,11 @@ async function getHeadToHeadState(room: any, userId: any) {
 }
 
 // Moves a room to the next round once its timer has passed. The filter means only one poll can move it
-async function moveToRound(room: any, fromRound: string, toRound: string, timerField: string) {
+async function moveToRound(room: any, fromRound: string, toRound: string, timerField: "h2h_starts_at" | "final_starts_at") {
+  // built as a plain record first: a computed key inside the call makes TypeScript reject the filter type
+  const filter: Record<string, unknown> = { _id: room._id, currentRound: fromRound, round_finished: true, [timerField]: { $lte: new Date() } };
   await GameRoom.updateOne(
-    { _id: room._id, currentRound: fromRound, round_finished: true, [timerField]: { $lte: new Date() } },
+    filter,
     {
       $set: { currentRound: toRound, round_finished: false, round_players: room.players.map(playerIdOf) },
       $inc: { version: 1 },
